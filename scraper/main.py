@@ -11,6 +11,7 @@ Usage:
 """
 import sys
 import os
+from datetime import datetime, timezone
 import pandas as pd
 from config import OUTPUT_DIR
 
@@ -54,11 +55,30 @@ def run_all(sources=None):
     frames = [df for df in results.values() if df is not None and not df.empty]
     if frames:
         combined = pd.concat(frames, ignore_index=True)
+
+        # Timestamp every row so snapshots are usable for time-series modeling
+        now_utc = datetime.now(timezone.utc)
+        stamp = now_utc.isoformat(timespec="seconds")
+        if "scraped_at" not in combined.columns:
+            combined["scraped_at"] = stamp
+        else:
+            combined["scraped_at"] = combined["scraped_at"].fillna(stamp)
+
+        # Save latest snapshot
         out_path = os.path.join(OUTPUT_DIR, "all_products_combined.csv")
         combined.to_csv(out_path, index=False, encoding="utf-8-sig")
+
+        # Save historical snapshot ledger (crucial for time-series modeling)
+        history_dir = os.path.join(OUTPUT_DIR, "history")
+        os.makedirs(history_dir, exist_ok=True)
+        snapshot_path = os.path.join(
+            history_dir, f"snapshot_{now_utc.strftime('%Y%m%d_%H%M%S')}.csv")
+        combined.to_csv(snapshot_path, index=False, encoding="utf-8-sig")
+
         print(f"\n{'='*60}")
         print(f"COMBINED RESULTS: {len(combined)} total products")
         print(f"Saved to: {out_path}")
+        print(f"History snapshot: {snapshot_path}")
         print(f"{'='*60}")
         print(f"\nBreakdown by source:")
         print(combined["source"].value_counts().to_string())

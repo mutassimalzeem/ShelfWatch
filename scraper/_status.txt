@@ -1,0 +1,13 @@
+﻿PYTHON_PROCS=0
+
+FullName                                                                                    LastWriteTime        Length
+--------                                                                                    -------------        ------
+I:\My Drive\Coding\Data Science Project\ShelfWatch\scraper\output\chaldal_products.csv      10/6/2026 1:40:46 PM  35629
+I:\My Drive\Coding\Data Science Project\ShelfWatch\scraper\output\shwapno_products.csv      10/6/2026 1:43:29 PM  29547
+I:\My Drive\Coding\Data Science Project\ShelfWatch\scraper\output\daraz_products.csv        10/6/2026 1:43:54 PM   1095
+I:\My Drive\Coding\Data Science Project\ShelfWatch\scraper\output\othoba_products.csv       10/6/2026 1:44:06 PM    844
+I:\My Drive\Coding\Data Science Project\ShelfWatch\scraper\output\all_products_combined.csv 10/6/2026 5:08:03 PM  66853
+
+
+
+---RUNLOG---

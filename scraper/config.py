@@ -12,6 +12,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 REQUEST_TIMEOUT = 30
 CRAWL_DELAY = 3  # seconds between requests (polite scraping)
 MAX_RETRIES = 3
+MAX_PAGES = 5  # max pagination pages to follow per category
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -68,7 +69,6 @@ DARAZ_CATEGORIES = [
 # --- Othoba ---
 OTHOBA_BASE = "https://www.othoba.com"
 OTHOBA_CATEGORIES = [
-    "/grocery",
     "/household-essentials",
     "/daily-bazar",
 ]

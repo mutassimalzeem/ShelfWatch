@@ -1,0 +1,90 @@
+[CHALDAL] Scraping 8 categories...
+  https://chaldal.com/fresh-fruit
+  [RETRY 1/3] https://chaldal.com/fresh-fruit: HTTPSConnectionPool(host='chaldal.com', port=443): Read timed out. (read timeout=30). Waiting 2s...
+    -> 25 products
+  https://chaldal.com/fresh-vegetable
+  [RETRY 1/3] https://chaldal.com/fresh-vegetable: HTTPSConnectionPool(host='chaldal.com', port=443): Read timed out. (read timeout=30). Waiting 2s...
+    -> 50 products
+  https://chaldal.com/rices
+  [RETRY 1/3] https://chaldal.com/rices: HTTPSConnectionPool(host='chaldal.com', port=443): Read timed out. (read timeout=30). Waiting 2s...
+  [RETRY 2/3] https://chaldal.com/rices: HTTPSConnectionPool(host='chaldal.com', port=443): Read timed out. (read timeout=30). Waiting 4s...
+    -> 37 products
+  https://chaldal.com/oil
+  [RETRY 1/3] https://chaldal.com/oil: HTTPSConnectionPool(host='chaldal.com', port=443): Read timed out. (read timeout=30). Waiting 2s...
+    -> 44 products
+  https://chaldal.com/spices
+  [RETRY 1/3] https://chaldal.com/spices: HTTPSConnectionPool(host='chaldal.com', port=443): Read timed out. (read timeout=30). Waiting 2s...
+    -> 50 products
+  https://chaldal.com/noodles
+    -> 43 products
+  https://chaldal.com/soft-drinks
+    -> 50 products
+  https://chaldal.com/laundry
+    -> 50 products
+[CHALDAL] Saved 349 -> i:\My Drive\Coding\Data Science Project\ShelfWatch\scraper\output\chaldal_products.csv
+  [PW] https://www.shwapno.com/oil
+    -> 279 cards found
+  [PW] https://www.shwapno.com/soybean-oil
+    -> 81 cards found
+  [PW] https://www.shwapno.com/rice
+    -> 403 cards found
+  [PW] https://www.shwapno.com/spices
+    -> 450 cards found
+  [PW] https://www.shwapno.com/fish
+    -> 550 cards found
+  [PW] https://www.shwapno.com/meat
+    -> 280 cards found
+  [PW] https://www.shwapno.com/dairy
+    -> 450 cards found
+  [PW] https://www.shwapno.com/frozen-snacks-others
+    -> 342 cards found
+[SHWAPNO] Saved 250 -> i:\My Drive\Coding\Data Science Project\ShelfWatch\scraper\output\shwapno_products.csv
+  [PW] https://www.daraz.com.bd/catalog/
+    -> 0 products
+  [PW] https://www.daraz.com.bd/fruits-meat-frozen/
+    -> 0 products
+  [PW] https://www.daraz.com.bd/breakfast/
+    -> 0 products
+  [PW] https://www.daraz.com.bd/cooking-ingredients/
+    -> 0 products
+  [PW] https://www.daraz.com.bd/snacks-beverages/
+    -> 0 products
+  [PW] https://www.daraz.com.bd/dairy-eggs/
+    -> 0 products
+  [PW] https://www.daraz.com.bd/herbs-spices-sauces/
+    -> 0 products
+  [PW] https://www.daraz.com.bd/laundry-household/
+    -> 0 products
+[OTHOBA] Scraping 2 categories...
+  https://www.othoba.com/household-essentials
+    -> 0 products
+  https://www.othoba.com/daily-bazar
+    -> 0 products
+i:\My Drive\Coding\Data Science Project\ShelfWatch\scraper\main.py:57: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  combined = pd.concat(frames, ignore_index=True)
+
+============================================================
+COMBINED RESULTS: 599 total products
+Saved to: i:\My Drive\Coding\Data Science Project\ShelfWatch\scraper\output\all_products_combined.csv
+History snapshot: i:\My Drive\Coding\Data Science Project\ShelfWatch\scraper\output\history\snapshot_20261006_112710.csv
+============================================================
+
+Breakdown by source:
+source
+chaldal    349
+shwapno    250
+
+Columns: ['source', 'title', 'price', 'list_price', 'discount_percent', 'stock_flag', 'category_path', 'category_rank', 'url', 'scraped_at']
+
+Sample rows:
+    source                                title  price  list_price  discount_percent stock_flag                              category_path  category_rank                              url                 scraped_at
+0  chaldal         Banana Chompa (Ready To Eat)   29.0        45.0              36.0   in_stock  Food > Fruits & Vegetables > Fresh Fruits              1  https://chaldal.com/fresh-fruit  2026-10-06T11:27:10+00:00
+1  chaldal           Shagor Kola (Banana Sagor)   55.0        60.0               8.0   in_stock  Food > Fruits & Vegetables > Fresh Fruits              2  https://chaldal.com/fresh-fruit  2026-10-06T11:27:10+00:00
+2  chaldal              Guava Premium (± 50 gm)  119.0         NaN               NaN   in_stock  Food > Fruits & Vegetables > Fresh Fruits              3  https://chaldal.com/fresh-fruit  2026-10-06T11:27:10+00:00
+3  chaldal                          Bangla Kola   45.0        55.0              18.0   in_stock  Food > Fruits & Vegetables > Fresh Fruits              4  https://chaldal.com/fresh-fruit  2026-10-06T11:27:10+00:00
+4  chaldal                        Malta ± 50 gm  319.0         NaN               NaN   in_stock  Food > Fruits & Vegetables > Fresh Fruits              5  https://chaldal.com/fresh-fruit  2026-10-06T11:27:10+00:00
+5  chaldal             Daab (Green Coconut)each  149.0         NaN               NaN   in_stock  Food > Fruits & Vegetables > Fresh Fruits              6  https://chaldal.com/fresh-fruit  2026-10-06T11:27:10+00:00
+6  chaldal                  Dalim (Pomegranate)  269.0         NaN               NaN   in_stock  Food > Fruits & Vegetables > Fresh Fruits              7  https://chaldal.com/fresh-fruit  2026-10-06T11:27:10+00:00
+7  chaldal             China Fuji Apple ± 50 gm  399.0         NaN               NaN   in_stock  Food > Fruits & Vegetables > Fresh Fruits              8  https://chaldal.com/fresh-fruit  2026-10-06T11:27:10+00:00
+8  chaldal                    Paka Pape ± 50 gm  179.0       200.0              10.0   in_stock  Food > Fruits & Vegetables > Fresh Fruits              9  https://chaldal.com/fresh-fruit  2026-10-06T11:27:10+00:00
+9  chaldal  Shada Nashpati ± 50 gm (Pear White)  179.0       185.0               3.0   in_stock  Food > Fruits & Vegetables > Fresh Fruits             10  https://chaldal.com/fresh-fruit  2026-10-06T11:27:10+00:00

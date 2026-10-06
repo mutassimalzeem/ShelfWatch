@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import pandas as pd
 from config import (OTHOBA_BASE, OTHOBA_CATEGORIES, HEADERS,
-                    REQUEST_TIMEOUT, CRAWL_DELAY, OUTPUT_DIR)
+                    REQUEST_TIMEOUT, CRAWL_DELAY, OUTPUT_DIR, MAX_PAGES)
 
 
 def parse_price(price_text):
@@ -108,7 +108,38 @@ def _parse_text(soup, cat_path, url):
     return products
 
 
-def scrape_othoba(categories=None):
+def _paginated_url(base_url, page):
+    """nopCommerce listing pages accept ?page=N."""
+    if page <= 1:
+        return base_url
+    sep = "&" if "?" in base_url else "?"
+    return f"{base_url}{sep}page={page}"
+
+
+def scrape_othoba_paginated(base_url, session, max_pages=MAX_PAGES):
+    """Follow ?page=N until a page returns no new products."""
+    products = []
+    seen = set()
+    for page in range(1, max_pages + 1):
+        url = _paginated_url(base_url, page)
+        prods = scrape_othoba_page(url, session)
+        if not prods:
+            break
+        new = []
+        for p in prods:
+            key = (p.get("title"), p.get("price"))
+            if key not in seen:
+                seen.add(key)
+                new.append(p)
+        if not new:
+            break
+        products.extend(new)
+        print(f"    -> page {page}: {len(new)} new products (total {len(products)})")
+        time.sleep(CRAWL_DELAY)
+    return products
+
+
+def scrape_othoba(categories=None, max_pages=MAX_PAGES):
     if categories is None:
         categories = OTHOBA_CATEGORIES
     session = requests.Session()
@@ -118,7 +149,9 @@ def scrape_othoba(categories=None):
     for cat in categories:
         url = urljoin(OTHOBA_BASE, cat)
         print(f"  {url}")
-        prods = scrape_othoba_page(url, session)
+        prods = scrape_othoba_paginated(url, session, max_pages=max_pages)
+        for rank, p in enumerate(prods, 1):
+            p["category_rank"] = rank
         all_products.extend(prods)
         print(f"    -> {len(prods)} products")
         time.sleep(CRAWL_DELAY)
