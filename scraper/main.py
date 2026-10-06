@@ -13,7 +13,27 @@ import sys
 import os
 from datetime import datetime, timezone
 import pandas as pd
-from config import OUTPUT_DIR
+from config import OUTPUT_DIR, DARAZ_ENABLED, HISTORY_KEEP
+
+# Scraped titles/prices contain Bengali text; redirected stdout on Windows
+# defaults to cp1252 and would crash the run with UnicodeEncodeError.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+def _prune_history(history_dir, keep):
+    """Retain only the newest `keep` snapshot CSVs so the ledger stays bounded."""
+    if keep <= 0:
+        return
+    snaps = sorted(f for f in os.listdir(history_dir)
+                   if f.startswith("snapshot_") and f.endswith(".csv"))
+    for old in snaps[:-keep]:
+        try:
+            os.remove(os.path.join(history_dir, old))
+            print(f"[HISTORY] pruned old snapshot {old}")
+        except OSError:
+            pass
 
 
 def run_all(sources=None):
@@ -35,7 +55,10 @@ def run_all(sources=None):
             print(f"[SHWAPNO] Fatal error: {e}")
             results["shwapno"] = pd.DataFrame()
 
-    if sources is None or "daraz" in sources:
+    if sources is None and not DARAZ_ENABLED:
+        print("[DARAZ] Skipped (DARAZ_ENABLED=False in config.py; "
+              "run `python main.py daraz` to force).")
+    elif sources is None or "daraz" in sources:
         try:
             from scraper_daraz import scrape_daraz
             results["daraz"] = scrape_daraz()
@@ -74,6 +97,7 @@ def run_all(sources=None):
         snapshot_path = os.path.join(
             history_dir, f"snapshot_{now_utc.strftime('%Y%m%d_%H%M%S')}.csv")
         combined.to_csv(snapshot_path, index=False, encoding="utf-8-sig")
+        _prune_history(history_dir, HISTORY_KEEP)
 
         print(f"\n{'='*60}")
         print(f"COMBINED RESULTS: {len(combined)} total products")

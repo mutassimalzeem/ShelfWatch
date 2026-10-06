@@ -45,6 +45,10 @@ python main.py othoba
 # Or run individual scraper files directly
 python scraper_chaldal.py
 python scraper_othoba.py
+
+# Daraz is disabled by default (bot-check blocked, non-grocery noise);
+# force it with:
+python main.py daraz
 ```
 
 ## Output
@@ -52,9 +56,26 @@ python scraper_othoba.py
 CSV files saved to `scraper/output/`:
 - `chaldal_products.csv`
 - `shwapno_products.csv`
-- `daraz_products.csv`
+- `daraz_products.csv` (only when Daraz is enabled/forced)
 - `othoba_products.csv`
-- `all_products_combined.csv` (combined)
+- `all_products_combined.csv` (combined; every row carries a UTC `scraped_at`)
+- `history/snapshot_<UTC timestamp>.csv` — snapshot ledger for time-series
+  modeling; oldest snapshots are pruned beyond `HISTORY_KEEP` (config.py)
+
+## Database & Scheduling
+
+- `python src/storage/db.py` ingests `all_products_combined.csv` into
+  `shelfwatch.db` (table `snapshots`). Ingestion is idempotent per file
+  content (SHA-256 run id stored in `ingest_log`) and preserves the CSV's
+  UTC `scraped_at` instead of re-stamping with local time.
+- `python run_crawler_scheduler.py` runs scrape + ingest every 6 hours using
+  absolute paths, a UTF-8 child environment and a `scheduler.lock` lock file.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
 
 ## Legal Compliance Notes
 
@@ -72,3 +93,5 @@ CSV files saved to `scraper/output/`:
 - Daraz category grids may return empty without JS rendering
 - Exact CSS selectors may need updating if sites change their markup
 - Stock flags are inferred from visible text; may not reflect real-time inventory
+- Othoba pagination follows discovered pager hrefs; if markup changes, only page 1 is scraped
+- Daraz category grids are bot-check blocked; only the /catalog/ flash-sale strip is reachable
