@@ -1,11 +1,31 @@
-import os, sqlite3
+"""SQLite storage for ShelfWatch snapshots.
+
+Ingestion is idempotent: every CSV is fingerprinted (SHA-256 of its bytes)
+and recorded in `ingest_log`, so re-running on the same file is a no-op.
+The CSV's own UTC `scraped_at` column is preserved when present instead of
+being overwritten with a local naive timestamp.
+"""
+import hashlib
+import os
+import sqlite3
+from datetime import datetime, timezone
+
 import pandas as pd
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "../../shelfwatch.db")
+DB_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "shelfwatch.db"))
 
-def init_db():
-    """Initialize the SQLite database and create the products table if it doesn't exist."""
-    conn = sqlite3.connect(DB_PATH)
+
+def _connect():
+    return sqlite3.connect(DB_PATH)
+
+
+def init_db(conn=None):
+    """Create the snapshots + ingest_log tables and indexes if missing."""
+    close = False
+    if conn is None:
+        conn = _connect()
+        close = True
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS snapshots (
@@ -23,39 +43,89 @@ def init_db():
         );
     ''')
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ingest_log (
+            run_id TEXT PRIMARY KEY,
+            csv_path TEXT NOT NULL,
+            rows INTEGER NOT NULL,
+            ingested_at TEXT NOT NULL
+        );
+    ''')
+    cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_source_url ON snapshots (source, url);
     ''')
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_scraped_at ON snapshots (scraped_at);
     ''')
     conn.commit()
-    conn.close()
+    if close:
+        conn.close()
 
 
-def ingest_latest_csv(csv_path: str):
-    """Ingest the latest CSV file into the SQLite database."""
+def _file_run_id(csv_path):
+    h = hashlib.sha256()
+    with open(csv_path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def ingest_latest_csv(csv_path: str, force: bool = False):
+    """Append a combined CSV once per unique file content. Returns row count."""
     if not os.path.exists(csv_path):
         print(f"[DB] CSV file not found: {csv_path}")
-        return
+        return 0
 
     df = pd.read_csv(csv_path)
     if df.empty:
         print(f"[DB] CSV file is empty: {csv_path}")
-        return
+        return 0
 
-    # Add a timestamp for when the data was scraped
-    df['scraped_at'] = pd.Timestamp.now()
+    # Keep the scraper's UTC stamp; only fabricate one when absent.
+    fallback = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if "scraped_at" not in df.columns:
+        df["scraped_at"] = fallback
+    else:
+        df["scraped_at"] = df["scraped_at"].fillna(fallback)
 
-    conn = sqlite3.connect(DB_PATH)
-    df.to_sql('snapshots', conn, if_exists='append', index=False)
+    run_id = _file_run_id(csv_path)
+    conn = _connect()
+    init_db(conn)
+    if not force and conn.execute(
+            "select 1 from ingest_log where run_id = ?", (run_id,)).fetchone():
+        print(f"[DB] Already ingested (run_id {run_id[:12]}...): {csv_path}")
+        conn.close()
+        return 0
+
+    df.to_sql("snapshots", conn, if_exists="append", index=False)
+    conn.execute(
+        "insert or replace into ingest_log (run_id, csv_path, rows, ingested_at) "
+        "values (?, ?, ?, ?)",
+        (run_id, csv_path, len(df),
+         datetime.now(timezone.utc).isoformat(timespec="seconds")))
+    conn.commit()
     conn.close()
-    print(f"[DB] Ingested {len(df)} rows from {csv_path} into the database.")
+    print(f"[DB] Ingested {len(df)} rows from {csv_path} (run_id {run_id[:12]}...).")
+    return len(df)
+
+
+def rebuild_snapshots(csv_path: str):
+    """One-time repair: drop legacy duplicated rows, then ingest cleanly."""
+    conn = _connect()
+    init_db(conn)
+    conn.execute("delete from snapshots")
+    conn.execute("delete from ingest_log")
+    conn.commit()
+    conn.close()
+    print("[DB] snapshots + ingest_log cleared for rebuild.")
+    return ingest_latest_csv(csv_path, force=True)
 
 
 if __name__ == "__main__":
     init_db()
-    latest_file = os.path.join(os.path.dirname(__file__), "../../scraper/output/all_products_combined.csv")
-
+    latest_file = os.path.normpath(os.path.join(
+        os.path.dirname(__file__), "..", "..",
+        "scraper", "output", "all_products_combined.csv"))
     if os.path.exists(latest_file):
         ingest_latest_csv(latest_file)
-        print(f"[DB] Ingested latest CSV: {latest_file}")
+    else:
+        print(f"[DB] CSV file not found: {latest_file}")
