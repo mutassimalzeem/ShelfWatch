@@ -42,6 +42,31 @@ def scrape_shwapno(categories=None):
         return _scrape_http(categories)
 
 
+def _pw_card_prices(card):
+    """Return (price, list_price) from leaf price nodes only.
+
+    The old code fed a whole-container inner_text() blob ("৳ 500 ৳ 485")
+    into parse_price, which stripped separators and glued the digits
+    (500485.0). Querying leaf nodes keeps current and struck-through
+    prices separate.
+    """
+    candidates = []
+    for el in card.query_selector_all("[class*='price'], del, s"):
+        if el.query_selector("[class*='price'], del, s"):
+            continue  # container wrapping other price nodes
+        tag = (el.evaluate("e => e.tagName") or "").lower()
+        val = parse_price(el.inner_text())
+        if val:
+            candidates.append((tag, val))
+    struck = [v for t, v in candidates if t in ("del", "s")]
+    normal = [v for t, v in candidates if t not in ("del", "s")]
+    price = min(normal) if normal else None
+    list_price = max(struck) if struck else (max(normal) if len(normal) > 1 else None)
+    if list_price is not None and price is not None and list_price <= price:
+        list_price = None
+    return price, list_price
+
+
 def _scrape_playwright(categories):
     from playwright.sync_api import sync_playwright
     all_products = []
@@ -56,30 +81,37 @@ def _scrape_playwright(categories):
                 page.wait_for_timeout(3000)
                 bc = page.query_selector_all("nav a, .breadcrumb a")
                 cat_path = " > ".join(el.inner_text() for el in bc if el.inner_text().strip())
-                # Find product cards
+                # Find product cards; nested container over-match is removed
+                # by de-duplicating on title and re-ranking afterwards.
                 cards = page.query_selector_all("[class*='product'], [class*='card']")
-                for rank, card in enumerate(cards, start=1):
+                seen_titles = set()
+                cat_products = []
+                for card in cards:
                     try:
                         t_el = card.query_selector("[class*='name'], [class*='title'], h3, h4, a")
-                        title = t_el.inner_text().strip() if t_el else None
-                        p_el = card.query_selector("[class*='price']")
-                        price = parse_price(p_el.inner_text()) if p_el else None
-                        o_el = card.query_selector("del, s, [class*='old'], [class*='original']")
-                        list_price = parse_price(o_el.inner_text()) if o_el else None
+                        raw_title = t_el.inner_text().strip() if t_el else None
+                        title = re.sub(r"\s+", " ", raw_title or "").strip()
+                        if not title or len(title) > 150 or title in seen_titles:
+                            continue
+                        seen_titles.add(title)
+                        price, list_price = _pw_card_prices(card)
                         txt = card.inner_text().lower()
                         stock = "out_of_stock" if "out of stock" in txt or "sold" in txt else "in_stock"
                         disc = None
                         if list_price and price and list_price > price:
                             disc = round((1 - price / list_price) * 100)
                         if title and price:
-                            all_products.append({
+                            cat_products.append({
                                 "source": "shwapno", "title": title, "price": price,
                                 "list_price": list_price, "discount_percent": disc,
                                 "stock_flag": stock, "category_path": cat_path,
-                                "category_rank": rank, "url": url})
+                                "category_rank": 0, "url": url})
                     except Exception:
                         continue
-                print(f"    -> {len(cards)} cards found")
+                for rank, pr in enumerate(cat_products, 1):
+                    pr["category_rank"] = rank
+                all_products.extend(cat_products)
+                print(f"    -> {len(cat_products)} products from {len(cards)} cards")
             except Exception as e:
                 print(f"    [ERROR] {e}")
             page.wait_for_timeout(int(CRAWL_DELAY * 1000))

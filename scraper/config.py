@@ -13,6 +13,12 @@ REQUEST_TIMEOUT = 30
 CRAWL_DELAY = 3  # seconds between requests (polite scraping)
 MAX_RETRIES = 3
 MAX_PAGES = 5  # max pagination pages to follow per category
+HISTORY_KEEP = 60  # rolling count of snapshot CSVs retained in output/history
+
+# Daraz category grids are bot-check blocked; the only SSR data is the
+# /catalog/ flash-sale strip, which is non-grocery noise. Disabled by
+# default; run `python main.py daraz` to force it.
+DARAZ_ENABLED = False
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -28,7 +34,6 @@ HEADERS = {
 
 # --- Chaldal ---
 CHALDAL_BASE = "https://chaldal.com"
-CHALDAL_SITEMAP = f"{CHALDAL_BASE}/sitemap.xml"
 CHALDAL_CATEGORIES = [
     "/fresh-fruit",
     "/fresh-vegetable",
@@ -42,7 +47,6 @@ CHALDAL_CATEGORIES = [
 
 # --- Shwapno ---
 SHWAPNO_BASE = "https://www.shwapno.com"
-SHWAPNO_SITEMAP_CATEGORIES = f"{SHWAPNO_BASE}/sitemap-categories.xml"
 SHWAPNO_CATEGORIES = [
     "/oil",
     "/soybean-oil",
