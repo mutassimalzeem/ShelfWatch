@@ -9,6 +9,7 @@ import hashlib
 import os
 import sqlite3
 from datetime import datetime, timezone
+from src.features.pack_parser import parse_pack_size, calculate_normalized_price
 
 import pandas as pd
 
@@ -39,7 +40,10 @@ def init_db(conn=None):
             category_path TEXT,
             category_rank INTEGER,
             url TEXT,
-            scraped_at TIMESTAMP NOT NULL
+            scraped_at TIMESTAMP NOT NULL,
+            normalized_unit TEXT,
+            normalized_amount REAL,
+            price_per_100 REAL,
         );
     ''')
     cursor.execute('''
@@ -86,6 +90,13 @@ def ingest_latest_csv(csv_path: str, force: bool = False):
         df["scraped_at"] = fallback
     else:
         df["scraped_at"] = df["scraped_at"].fillna(fallback)
+
+    parsed_data = df['title'].apply(parse_pack_size)
+    df['normalized_amount'] = [x[0] for x in parsed_data]
+    df['normalized_unit'] = [x[1] for x in parsed_data]
+    df['price_per_100'] = df.apply(lambda row: calculate_normalized_price(row['price'], row['normalized_amount'])
+                                   if row['normalized_unit'] in ['g', 'ml'] else None, axis=1)
+                                          
 
     run_id = _file_run_id(csv_path)
     conn = _connect()
