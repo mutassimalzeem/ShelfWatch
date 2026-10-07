@@ -9,7 +9,8 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "scraper"))
 sys.path.insert(0, os.path.join(REPO_ROOT, "src", "features"))
 
 import main as scraper_main  # noqa: E402
-from pack_parser import parse_pack, unit_price  # noqa: E402
+from pack_parser import (parse_pack_size,  # noqa: E402
+                         calculate_normalized_price)
 from scraper_chaldal import parse_price  # noqa: E402
 from scraper_daraz import _paginated_url  # noqa: E402
 from scraper_othoba import _clean_title  # noqa: E402
@@ -52,20 +53,29 @@ class TestPaginatedUrl(unittest.TestCase):
 
 class TestPackParser(unittest.TestCase):
     def test_volume(self):
-        p = parse_pack("ACI Pure Mustard Oil 1Ltr.")
-        self.assertEqual(p["pack_unit"], "ml")
-        self.assertEqual(p["base_qty"], 1000.0)
+        self.assertEqual(parse_pack_size("ACI Pure Mustard Oil 1Ltr."),
+                         (1.0, "l", 1000.0))
 
-    def test_pack_count(self):
-        p = parse_pack("Nestle Maggi 2 Minute Masala Instant Noodles 16 pack")
-        self.assertEqual(p["pack_unit"], "pack")
-        self.assertEqual(p["pack_qty"], 16.0)
+    def test_weight_kg(self):
+        self.assertEqual(parse_pack_size("PRAN Minicate Rice 5kg"),
+                         (5.0, "kg", 5000.0))
+
+    def test_grams_with_plusminus(self):
+        self.assertEqual(parse_pack_size("Malta ± 50 gm"), (50.0, "g", 50.0))
+
+    def test_piece(self):
+        self.assertEqual(parse_pack_size("Daab (Green Coconut) each"),
+                         (1.0, "piece", None))
 
     def test_none(self):
-        self.assertIsNone(parse_pack("Banana Chompa (Ready To Eat)")["base_qty"])
+        self.assertEqual(parse_pack_size("Banana Chompa (Ready To Eat)"),
+                         (None, None, None))
+        self.assertEqual(parse_pack_size(None), (None, None, None))
 
-    def test_unit_price(self):
-        self.assertAlmostEqual(unit_price(380.0, "ACI Pure Mustard Oil 1Ltr."), 0.38)
+    def test_normalized_price(self):
+        self.assertEqual(calculate_normalized_price(380.0, 1000.0), 38.0)
+        self.assertIsNone(calculate_normalized_price(380.0, None))
+        self.assertIsNone(calculate_normalized_price(380.0, 0))
 
 
 class TestHistoryPruning(unittest.TestCase):
