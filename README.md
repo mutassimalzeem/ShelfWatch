@@ -257,6 +257,12 @@ Run the smoke tests from the repository root:
 python -m unittest discover -s tests -v
 ```
 
+`python src/models/train_baseline.py --selftest` exercises the modelling
+pipeline end-to-end on a deterministic synthetic fixture (no retailer
+contact, no database needed). When the stored snapshots contain too few
+stock-out events the trainer exits gracefully with guidance instead of
+raising a single-class error.
+
 Tests that contact retailer websites are not required for this command.
 
 ## Responsible collection
@@ -274,6 +280,7 @@ scraper/                 Retailer scrapers, configuration, and scraper guide
 src/features/            Pack-size parsing utilities
 src/storage/             SQLite schema and CSV ingestion
 src/eda/                 Basic data-audit script
+src/models/              Stock-out baseline model and feature builder
 tests/                   Stdlib smoke tests
 docs/                    Development workflow notes
 run_crawler_scheduler.py Six-hour scrape-and-ingest scheduler
