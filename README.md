@@ -6,7 +6,9 @@ ShelfWatch collects publicly visible product listings from selected Bangladeshi
 retail websites, keeps timestamped snapshots, and stores them locally for later
 comparison and analysis. The project is currently focused on building a
 reliable data-collection foundation; cross-retailer product matching, price
-analytics, and predictive models are future work.
+analytics, and production-ready predictive features remain future work. A
+baseline stock-out model is available for offline evaluation as the data
+history grows.
 
 ![Project status: in progress](https://img.shields.io/badge/status-in%20progress-yellow)
 ![Market: Bangladesh](https://img.shields.io/badge/market-Bangladesh-006a4e)
@@ -22,8 +24,9 @@ analytics, and predictive models are future work.
 | Snapshot history | Timestamped CSV snapshots; configured to retain up to 60 |
 | Storage | Local SQLite database with content-hash ingestion deduplication |
 | Analysis | A basic data-audit script and a standalone pack-size parser are present |
+| Modeling | A regularized logistic-regression stock-out baseline with temporal cross-validation |
 | Automated tests | Stdlib smoke tests, passing (re-aligned to the parser API on October 7, 2026) |
-| Machine learning / dashboards | Not implemented yet |
+| Dashboards / production predictions | Not implemented yet |
 
 The row counts above describe the local, ignored output files available when
 this README was updated. They are a progress checkpoint, not a promise about
@@ -221,6 +224,8 @@ separate backup if the local history is important.
   protection.
 - A six-hour scheduler with a lock file and UTF-8 child-process settings.
 - A basic audit script and a standalone pack-size / normalized-price utility.
+- A regularized logistic-regression stock-out baseline evaluated with
+  time-ordered folds; it guards against insufficient or single-class labels.
 
 ### Known limitations and validation note
 
@@ -231,9 +236,51 @@ separate backup if the local history is important.
   represent real-time inventory.
 - Product matching across retailers and pack-size normalization are not yet
   integrated into the collection/storage pipeline.
+- The stock-out baseline is an offline evaluation, not a deployed predictor.
+  It needs at least 1,000 snapshot rows and 20 positive `out_of_stock` labels;
+  single-class training folds are skipped, while single-class test folds are
+  fitted but excluded from metrics.
 - The smoke-test suite was re-aligned to the current parser API
   (`parse_pack_size` / `calculate_normalized_price`) on October 7, 2026 and is
   green again; keep it passing as a validation gate before merging branches.
+
+## Baseline stock-out model
+
+The baseline reads timestamped observations from `shelfwatch.db` and evaluates
+a regularized logistic-regression model using three time-ordered folds. It
+reports PR-AUC and F2 per evaluable fold; F2 gives more weight to recall so
+missed stock-outs are penalized. It does not save or deploy a trained model.
+
+Run it against the local database from the repository root:
+
+```bash
+python src/models/train_baseline.py
+```
+
+The trainer requires at least 1,000 rows and 20 positive labels. Its current
+`target_stockout` label is 1 only when a snapshot's `stock_flag` is
+`out_of_stock`; all other flags are treated as 0. Keep the six-hour scheduler
+running so snapshots accumulate. The trainer exits with guidance when the
+minimum data is not available. Folds with single-class training windows are
+skipped; models are still fitted for single-class test windows, but those
+windows are excluded from metrics.
+
+The SQL views in
+[`src/features/label_definitions.sql`](src/features/label_definitions.sql)
+describe repeated `out_of_stock` observations, but they are not currently used
+by the baseline, which builds its target directly from `snapshots.stock_flag`.
+Disappearance-based labels are not currently implemented in the training
+path.
+
+To validate the training pipeline without database data or retailer requests:
+
+```bash
+python src/models/train_baseline.py --selftest
+```
+
+The deterministic synthetic fixture is a pipeline check only; its metrics do
+not estimate real-world model performance. Real evaluation becomes meaningful
+only after the database has enough correctly labeled stock-out observations.
 
 ## Roadmap
 
