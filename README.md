@@ -26,6 +26,7 @@ history grows.
 | Analysis | A basic data-audit script and a standalone pack-size parser are present |
 | Modeling | A regularized logistic-regression stock-out baseline with temporal cross-validation |
 | Automated tests | Stdlib smoke tests, passing (re-aligned to the parser API on October 7, 2026) |
+| API layer | FastAPI endpoints for stock-out and shrinkflation queries (`src/api/main.py`) |
 | Dashboards / production predictions | Not implemented yet |
 
 The row counts above describe the local, ignored output files available when
@@ -67,6 +68,7 @@ flowchart LR
     CMB --> H[Timestamped history snapshots]
     CMB --> I[SQLite ingestion]
     I --> DB[(shelfwatch.db)]
+    DB --> API[FastAPI query endpoints]
     DB -. future analysis .-> F[Product matching and price intelligence]
 ```
 
@@ -312,6 +314,34 @@ raising a single-class error.
 
 Tests that contact retailer websites are not required for this command.
 
+## API
+
+A FastAPI application in `src/api/main.py` serves a local market dashboard and
+read-only query endpoints over the SQLite database. Start ShelfWatch from the
+repository root:
+
+```bash
+uvicorn src.api.main:app --reload
+```
+
+Open `http://127.0.0.1:8000` for the dashboard, or
+`http://127.0.0.1:8000/docs` for the interactive API reference.
+
+| Endpoint | Description |
+|---|---|
+| `GET /` | ShelfWatch dashboard |
+| `GET /api/health` | API and stored observation count |
+| `GET /api/overview` | Current product, stock, retailer, and collection-activity summary |
+| `GET /api/products` | Latest listings; supports search, retailer, stock, sort, and pagination filters |
+| `GET /api/products/{snapshot_id}/history` | Price and availability history for a product |
+| `GET /api/stockouts/current` | Latest products explicitly marked `out_of_stock` |
+| `GET /api/shrinkflation/alerts` | Products with a smaller comparable pack-size observation |
+
+The dashboard uses the latest stored snapshot and does not start scraping
+retailer sites. Availability and prices are observations, not guarantees of
+live store inventory. Pack-size alerts use stored normalized features when
+available and parse product titles for older or core-only databases.
+
 ## Project documentation
 
 Two living documents accompany this README and are updated alongside code
@@ -340,6 +370,8 @@ src/features/            Pack-size parsing utilities
 src/storage/             SQLite schema and CSV ingestion
 src/eda/                 Basic data-audit script
 src/models/              Stock-out baseline model and feature builder
+src/api/                 FastAPI API and same-origin market dashboard
+src/api/static/          Dashboard markup, styles, and browser interactions
 tests/                   Stdlib smoke tests
 docs/                    Development workflow notes
 run_crawler_scheduler.py Six-hour scrape-and-ingest scheduler

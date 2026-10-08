@@ -32,6 +32,7 @@ Chaldal (SSR)   Shwapno (CSR)    Daraz (opt-in)   Othoba (SSR)
       src/features/label_definitions.sql — stock-out label views
       src/models/ build_features -> train_baseline / train_advanced -> explain_shap
       run_crawler_scheduler.py — 6 h scrape->ingest cycle, lock file, UTF-8 env
+      src/api/main.py — FastAPI: stock-out & shrinkflation query endpoints (uvicorn)
 ```
 
 Design principles: (1) snapshots are append-only; time travels via
@@ -56,9 +57,11 @@ stays local (git-ignored); only code, tests and docs travel through Git.
 | `src/models/train_baseline.py` | L2 logistic regression, TimeSeriesSplit, data guards, `--selftest` |
 | `src/models/train_advanced.py` | Calibrated random forest (isotonic, cv=5), threshold 0.35 |
 | `src/models/explain_shap.py` | TreeExplainer over the RF; prints plotting instructions |
+| `src/api/main.py` | FastAPI app and dashboard; summary, latest products, product history, stock-out and pack-size-alert endpoints |
+| `src/api/static/` | Same-origin ShelfWatch market desk (HTML, CSS, vanilla JavaScript) |
 | `src/eda/audit_snapshot.py` | Quick audit of the combined CSV |
 | `run_crawler_scheduler.py` | 6 h loop with `scheduler.lock` |
-| `tests/` | `test_smoke.py` (14) + `test_train_baseline.py` (3) = 17 stdlib tests |
+| `tests/` | `test_smoke.py` (14) + `test_train_baseline.py` (3) + `test_api.py` (7) = 24 tests |
 | `docs/` | This file, CASE_STUDY.md, GIT_WORKFLOW.md |
 
 ## 4. Data model
@@ -127,11 +130,12 @@ Politeness: 3 s crawl delay, browser-like User-Agent, Foodpanda excluded
 python scraper/main.py [source...]        # scrape (all or one source)
 python src/storage/db.py                  # ingest combined CSV (idempotent)
 python run_crawler_scheduler.py           # 6 h scrape->ingest loop
-python -m unittest discover -s tests -v   # 17 stdlib tests
+python -m unittest discover -s tests -v   # 24 tests, including API contracts
 python src/models/train_baseline.py [--selftest]
 python src/models/train_advanced.py       # needs >=1000 rows & 20 positives
 python src/models/explain_shap.py
 python src/eda/audit_snapshot.py
+uvicorn src.api.main:app --reload       # Dashboard + API on :8000
 ```
 
 Windows notes: run Python with `-X utf8` (or `PYTHONUTF8=1`) when output is
@@ -160,6 +164,8 @@ the folder on disk — see CASE_STUDY entry E16.
 | 2026-10-07 | Docs: baseline training guidance | PR #2 (`1e57b4c`) |
 | 2026-10-08 | Calibrated random forest + SHAP explainer | PR #3 (`4735a5d`) |
 | 2026-10-08 | Living docs: PROJECT_DOCUMENTATION.md + CASE_STUDY.md | this commit |
+| 2026-10-08 | FastAPI query API: stock-out & shrinkflation endpoints over shelfwatch.db | `src/api/main.py` |
+| 2026-10-08 | Same-origin market dashboard, product search/history, and API contract tests | `src/api/static/`, `tests/test_api.py` |
 
 ## 10. Known limitations & open items
 
@@ -179,3 +185,5 @@ the folder on disk — see CASE_STUDY entry E16.
 6. `imgs/` remains locked on disk by Google Drive sync (hidden from git via
    skip-worktree); `git status` may warn "could not open directory 'imgs/'".
 7. Selectors/regexes are markup-sensitive; no license declared yet.
+8. The API is intended for local use and does not provide authentication or
+   rate limiting. Do not expose it directly to an untrusted network.
