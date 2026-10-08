@@ -1,8 +1,11 @@
 # ShelfWatch — Project Documentation
 
-> **Living document.** Last updated 2026-10-08 against `main` @ `4735a5d`.
+> **Living document.** Updated 2026-10-08 after production deployment from
+> `main` @ `a0253e2`.
 > Companions: [CASE_STUDY.md](CASE_STUDY.md) (problems & lessons narrative) ·
 > [GIT_WORKFLOW.md](GIT_WORKFLOW.md) (branch/commit/push conventions) ·
+> [model_card.md](model_card.md) (model results and limitations) ·
+> [runbook.md](runbook.md) (operational troubleshooting) ·
 > root [README.md](../README.md) (overview & roadmap).
 > **Update rule:** any commit that changes pipeline behaviour must also update
 > the relevant section here and append a line to §9 Changelog; notable
@@ -20,7 +23,7 @@ delivered features.
 ## 2. Architecture
 
 ```text
-Chaldal (SSR)   Shwapno (CSR)    Daraz (opt-in)   Othoba (SSR)
+Chaldal (SSR)   Shwapno (CSR)    Daraz (opt-in)   Othoba (JS-rendered)
      \              |                 |               /
       scraper/main.py — per-source try/except isolation, UTF-8 stdout
         |-- output/<source>_products.csv
@@ -125,6 +128,11 @@ Politeness: 3 s crawl delay, browser-like User-Agent, Foodpanda excluded
   skipped; metrics are PR-AUC and F2 (recall-weighted). `--selftest` runs a
   deterministic synthetic fixture (seed 7) with a logistic signal in the
   model's own features — a pipeline check, not a performance estimate.
+- Checked synthetic self-test (3 time-ordered folds): PR-AUC 0.774, 0.796,
+  0.816 (mean 0.795); F2 0.806, 0.790, 0.801 (mean 0.799). These are not
+  real-world scores. A read-only query of the production `snapshots` table on
+  2026-10-08 found 1,901 observations, all marked `in_stock`; therefore, no
+  real evaluation is possible yet.
 - `train_advanced.py`: RandomForest (100 trees, depth 10, balanced, OOB)
   wrapped in isotonic `CalibratedClassifierCV(cv=5)`; predicts positive at
   probability >= 0.35. Known issues are listed in §10.
@@ -149,11 +157,19 @@ Production deployment uses `api/index.py` as the Vercel Python function and
 `vercel.json` to rewrite all dashboard/API/static-asset paths through FastAPI,
 with Neon PostgreSQL selected through `DATABASE_URL`. The
 `.github/workflows/scrape-and-ingest.yml` workflow runs on a six-hour schedule;
-add `DATABASE_URL` as a GitHub Actions secret before enabling it. To seed the
-hosted database, set `DATABASE_URL` in the local shell and run
-`python -m src.storage.migrate_to_postgres`. The one-time migration preserves
-snapshot IDs and refuses to overwrite a non-empty destination. The full setup
-is documented in the root README.
+`DATABASE_URL` is configured as a GitHub Actions secret. On 2026-10-08 the
+first hosted workflow completed successfully and added 651 observations.
+Vercel's Git integration is connected to the repository; merge commits on
+`main` trigger production deployments. The deployed API uses Neon through
+`DATABASE_URL`.
+
+The production database was seeded from 1,250 local SQLite observations by
+`python -m src.storage.migrate_to_postgres`. This one-time migration preserves
+snapshot IDs and refuses to write to a non-empty destination. Do not run it
+against the populated production database. At the post-ingestion check,
+production contained 1,901 observations and 597 current listings across
+Chaldal and Shwapno. Counts change with later collection runs. Setup steps
+for a separate deployment are in the root README.
 
 Windows notes: run Python with `-X utf8` (or `PYTHONUTF8=1`) when output is
 redirected; PowerShell surfaces native stderr as `NativeCommandError` noise —
@@ -185,6 +201,8 @@ the folder on disk — see CASE_STUDY entry E16.
 | 2026-10-08 | Same-origin market dashboard, product search/history, and API contract tests | `src/api/static/`, `tests/test_api.py` |
 | 2026-10-08 | Neon PostgreSQL support, safe SQLite history migration, and scheduled GitHub Actions collection for Vercel | `src/storage/`, `.github/workflows/` |
 | 2026-10-08 | Vercel Python function routing and Neon CLI project setup | `api/index.py`, `vercel.json`, `neon.ts` |
+| 2026-10-08 | Migrate 1,250 local observations; connect Vercel GitHub integration; first hosted collection adds 651 rows; production smoke checks | PR #8, workflow run #1 |
+| 2026-10-08 | Document production status, model score limits, and deployment lessons | README, CASE_STUDY.md, model_card.md, runbook.md |
 
 ## 10. Known limitations & open items
 
@@ -208,3 +226,13 @@ the folder on disk — see CASE_STUDY entry E16.
 8. The read-only API is public when deployed and has no application-level
    rate limiting. Keep database credentials server-side and use Vercel's
    platform-level abuse protections before promoting high-traffic use.
+9. Production count is a snapshot, not a promise that every collection returns
+   the same number of products. At the recorded check: 1,901 observations,
+   all marked `in_stock`, and 597 current listings.
+10. A product-history record contained a suspicious historical price of
+    ৳1,000,900 for a 1kg chicken momo product. The cause is unverified; do not
+    use this record as a confirmed price until its source data is checked.
+11. The checked local baseline self-test completed but emitted
+    `OptimizeWarning: Unknown solver options: iprint`. The scores were
+    produced, but the dependency warning should be investigated before
+    treating the local modelling environment as clean.

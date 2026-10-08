@@ -1,19 +1,19 @@
 # ShelfWatch Git Workflow Guide
 
-How the scraper-correctness fix was landed "like a developer", plus a
-practical cheat-sheet you can reuse. Every command below was actually used
-in this repo (Windows PowerShell; paths quoted because of spaces).
+Use small branches and pull requests so changes can be reviewed and tracked.
+Commands below are written for Windows PowerShell.
 
 ## 0. Prerequisites
 
 ```powershell
 git remote -v                 # confirm origin points at your GitHub repo
-git switch main               # start from main            (old: git checkout main)
-git pull --ff-only origin main                            # fast-forward to latest
-git status                    # must be clean before branching
+git fetch origin
+git switch main
+git pull --ff-only origin main
+git status                    # review and preserve local changes
 ```
 
-## 1. Annotated log of this session
+## 1. Make and submit a change
 
 1. **Create + switch to a feature branch** (never commit fixes straight to main):
 
@@ -31,62 +31,30 @@ git status                    # must be clean before branching
    git diff --staged           # what is already queued for the next commit
    ```
 
-3. **Untrack files that were committed by mistake but must stay on disk**
-   (our `_*.py` / `_*.txt` / `_*.bat` debug scratch files). First add ignore
-   rules to `.gitignore`, then:
+3. **Stage per logical area and commit small, focused commits**
+   (message style: `type: short summary`):
 
    ```powershell
-   git rm --cached scraper/_full_run.txt scraper/_probe_pages.py   # …all 13 files
+   git add README.md docs\CASE_STUDY.md
+   git commit -m "docs: update project and deployment notes"
    ```
 
-   `--cached` removes them from the *index* only; the files remain in your
-   working folder, and `.gitignore` keeps them untracked forever after.
-
-4. **Stage per logical area and commit small, focused commits**
-   (message style: `type: imperative summary`, ≤ ~72 chars, body explains why):
-
-   ```powershell
-   git add .gitignore
-   git commit -m "chore: ignore session scratch files and untrack committed probes"
-
-   git add scraper/config.py scraper/main.py scraper/scraper_shwapno.py `
-             scraper/scraper_othoba.py scraper/README.md
-   git commit -m "fix: scraper correctness (shwapno prices, othoba pager, daraz gate)"
-
-   git add src/storage/db.py src/features/pack_parser.py src/__init__.py `
-             src/eda/__init__.py src/features/__init__.py src/storage/__init__.py `
-             run_crawler_scheduler.py
-   git commit -m "fix: idempotent UTC-preserving ingestion, hardened scheduler"
-
-   git add tests/test_smoke.py docs/GIT_WORKFLOW.md
-   git commit -m "test: stdlib smoke tests; docs: git workflow guide"
-   ```
-
-5. **Push the branch and set its upstream** (`-u` remembers origin/branch so
+4. **Push the branch and set its upstream** (`-u` remembers origin/branch so
    later plain `git push` / `git pull` work):
 
    ```powershell
    git push -u origin fix/scraper-correctness
    ```
 
-6. **Merge into main with a merge commit** (keeps the feature history visible):
+5. **Open a pull request to `main`** in GitHub, review the changed files, and
+   confirm the focused tests pass before merging.
 
-   ```powershell
-   git switch main
-   git merge --no-ff fix/scraper-correctness
-   git push origin main
-   ```
-
-7. **Clean up the branch** once merged:
+6. **Clean up the branch** once merged:
 
    ```powershell
    git branch -d fix/scraper-correctness
    git push origin --delete fix/scraper-correctness
    ```
-
-> Note: the GitHub CLI (`gh`) is not installed on this machine, so no pull
-> request was opened; push + merge was done with plain git. If you want PRs,
-> install GitHub CLI or use the web UI between steps 5 and 6.
 
 ## 2. Daily cheat-sheet
 
@@ -117,6 +85,11 @@ git stash drop stash@{0}                 # delete a stash
 ```
 
 ### Commit hygiene
+
+Review a command before using it if it can discard uncommitted work.
+`git restore <file>` discards changes to that file; `git reset` can move the
+current branch pointer. Prefer `git status` and a backup branch when unsure.
+
 ```powershell
 git add -p                      # stage hunk-by-hunk (review as you go)
 git commit --amend              # fix message/content of LAST commit (pre-push)
@@ -158,9 +131,17 @@ git push origin --delete <branch>
 - Before merging any branch: `python -m unittest discover -s tests -v`
   must pass from the repo root.
 
-## 4. Follow along with this session's push
+## 4. Release and deployment
 
 ```powershell
-git log --oneline --graph --decorate -12   # see branch + merge topology
-git show --stat HEAD~3                     # inspect any commit's file list
+git log --oneline --graph --decorate -12   # inspect recent history
 ```
+
+After a pull request is merged to `main`, Vercel automatically builds and
+deploys the project. Check Vercel's deployment status and verify the
+dashboard/API. GitHub Actions collects and ingests data separately, so check
+its workflow run too.
+
+This repository may be open in a Google Drive-synced folder. File locks have
+prevented some Git and package operations; check `git status` and preserve
+unrelated local changes rather than forcing cleanup.
