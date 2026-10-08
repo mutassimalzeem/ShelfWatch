@@ -312,6 +312,18 @@ raising a single-class error.
 
 Tests that contact retailer websites are not required for this command.
 
+## Project documentation
+
+Two living documents accompany this README and are updated alongside code
+changes:
+
+- [`docs/PROJECT_DOCUMENTATION.md`](docs/PROJECT_DOCUMENTATION.md) — technical
+  reference: architecture, data model, pipeline semantics, commands,
+  conventions, changelog, and open issues.
+- [`docs/CASE_STUDY.md`](docs/CASE_STUDY.md) — dated narrative of the problems
+  faced during development and the lessons learned, with a template for
+  recording future entries.
+
 ## Responsible collection
 
 ShelfWatch is intended to collect public product-listing information only.
