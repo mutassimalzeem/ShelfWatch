@@ -1,6 +1,8 @@
 # Bangladesh Grocery Scraper
 
-Scrapes product data from Bangladeshi grocery/e-commerce platforms for model training.
+Collects public product-listing data from selected Bangladeshi retailers.
+The main purpose today is to build a timestamped dataset and power the
+ShelfWatch dashboard; the stock-out model is not production-ready.
 
 ## Target Fields
 - `title` — Product name
@@ -17,10 +19,15 @@ Scrapes product data from Bangladeshi grocery/e-commerce platforms for model tra
 
 | Platform | Method | Notes |
 |----------|--------|-------|
-| **Chaldal** | `requests` + BS4 (SSR) | Best data quality, products in HTML |
-| **Shwapno** | Playwright (CSR) or HTTP fallback | JS-rendered; needs Playwright for full data |
-| **Daraz BD** | `requests` + BS4 (Hybrid) | Flash Sale SSR; category grids may need JS |
-| **Othoba** | `requests` + BS4 (SSR) | nopCommerce; good alternative source |
+| **Chaldal** | `requests` + BeautifulSoup | Enabled in scheduled collection; product listings are parsed from public pages |
+| **Shwapno** | Playwright or HTTP fallback | Enabled in scheduled collection; Playwright generally collects more from this JavaScript-rendered site |
+| **Daraz BD** | HTTP and page-data parsing | Disabled by default; category pages are blocked by bot checks and reachable results may be irrelevant |
+| **Othoba** | `requests` + BeautifulSoup | Enabled in the default runner, but currently produces no usable rows because its product grid is JavaScript-rendered |
+
+The first hosted collection completed on 2026-10-08 and added 651
+observations from Chaldal and Shwapno. Production then held 1,901
+observations and 597 current listings. These counts are a dated snapshot,
+not a guaranteed output size for future runs.
 
 ## Setup
 
@@ -95,3 +102,4 @@ python -m unittest discover -s tests -v
 - Stock flags are inferred from visible text; may not reflect real-time inventory
 - Othoba pagination follows discovered pager hrefs; if markup changes, only page 1 is scraped
 - Daraz category grids are bot-check blocked; only the /catalog/ flash-sale strip is reachable
+- Product records may contain parsing or source-data outliers. Verify surprising prices against the retailer page before analysis.

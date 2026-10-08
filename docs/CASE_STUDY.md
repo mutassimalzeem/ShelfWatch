@@ -8,20 +8,20 @@
 
 ## Abstract
 
-Over three days a four-source grocery scraper was turned from a crashing
-script into a tested, scheduled, documented data-collection pipeline with a
-baseline modelling layer and an explainability path (calibrated random forest
-+ SHAP). The dominant theme: **most failures were data and environment
-problems, not algorithm problems** — broken prices, missing timestamps,
-single-class labels, bot checks, Windows encodings, and a cloud-drive file
-lock. Each was converted into a guard, a test, or a documented limitation.
+Over three days, ShelfWatch grew from a fragile scraper into a tested,
+scheduled collection pipeline with a live dashboard. The main problems were
+data and environment issues—not advanced machine learning: bad prices,
+missing timestamps, blocked retailer pages, Windows encoding, cloud-drive
+file locks, and deployment routing. The fixes added checks and clearer
+limitations. The model is still experimental because production data does not
+yet include enough stock-out examples.
 
 ## 1. Context and goals
 
 The project aims at price and shelf-availability intelligence for Bangladesh
-grocery retail: repeated snapshots of public listings → stock-out labels →
-predictive models. Starting point (Oct 6): four scrapers, no timestamps, a
-non-idempotent DB ingest, no tests, no docs, and a first run that crashed.
+grocery retail: repeated snapshots of public listings → useful history →
+careful analysis. Starting point (Oct 6): four scrapers, no timestamps, a
+non-idempotent database ingest, no tests, and a first run that crashed.
 
 ## 2. Timeline — problems and solutions
 
@@ -102,9 +102,11 @@ hand-checked sample catches regex pathology that aggregate stats miss.
 Root cause: data, not code — every observed row is `in_stock`, so the target
 is single-class. Fix: pre-flight guards (≥1000 rows, ≥20 positives) with
 actionable messages, per-fold single-class skips, and a deterministic
-`--selftest` fixture whose logistic signal made all folds learnable
-(PR-AUC 0.77–0.82). Lesson: guard degenerate data; keep the pipeline
-testable before real events exist.
+`--selftest` fixture whose planted logistic signal made all folds learnable.
+The checked synthetic folds scored PR-AUC 0.774/0.796/0.816 and F2
+0.806/0.790/0.801. These are pipeline-test scores, not real-world model
+performance. Lesson: guard degenerate data; keep the pipeline testable before
+real events exist.
 
 **E14 · Oct 7 · "My label definitions vanished!" after `git checkout main`.**
 Root cause: branch isolation — the work lived on the feature branch; local
@@ -134,12 +136,84 @@ deprecated `base_estimator`) in PROJECT_DOCUMENTATION §10 rather than
 silently leaving them. Lesson: explainability tooling belongs in the repo
 from the start; known defects must be written down.
 
+**E18 · Oct 8 · FastAPI query layer added; unterminated string crash.**
+Symptom: `uvicorn src.api.main:app --reload` failed with `SyntaxError:
+unterminated triple-quoted string literal (detected at line 53)`. Root cause:
+the shrinkflation SQL query was left incomplete — the file ended mid-CTE
+without closing the triple-quote or adding the outer SELECT / response logic.
+Fix: completed the CTE, added the outer SELECT filtering
+`normalized_amount < prev_amount` (window-function LAG comparison), and wired
+the pandas read + 404 guard + JSON response mirroring the stockouts endpoint
+pattern. Two endpoints now live: `/api/stockouts/current` (NULL
+normalized_amount proxy) and `/api/shrinkflation/alerts` (pack-size shrink
+detection). Lesson: multi-line SQL strings are fragile; always syntax-check
+(`py_compile`) before starting a server, and keep endpoint bodies small and
+uniform.
+
+**E19 · Oct 8 · Neon CLI setup hit Google Drive package-install errors.**
+Symptom: npm reported extraction and file-operation errors (`EBADF` and
+`TAR_ENTRY_ERROR`) in the Google Drive-backed project folder. Root cause:
+the synced drive interfered with package installation. Resolution: install and
+run the Neon configuration tooling from a normal local folder, while keeping
+the project configuration in the repository. Lesson: run build tools on a
+filesystem they support; never work around the issue by committing local
+credentials or generated package files.
+
+**E20 · Oct 8 · Production database started empty.**
+Resolution: migrated the 1,250-row local SQLite history into Neon using the
+one-time migration. The migration preserves snapshot IDs and refuses to copy
+into a non-empty target. Lesson: check the destination before moving data and
+keep the local database as a backup.
+
+**E21 · Oct 8 · First Vercel deployment served the wrong entry point.**
+Symptom: the root Python file was delivered as text and API routes returned
+404. Root cause: Vercel did not treat the root `index.py` as a Python
+function. Fix: moved the function entry point to `api/index.py` and routed
+dashboard, API, and asset requests through FastAPI with `vercel.json`. The
+change was merged in PR #8; the resulting production deployment became Ready.
+Lesson: verify the actual deployed routes, not just a successful build.
+
+**E22 · Oct 8 · Vercel could not see the GitHub repository.**
+Symptom: the repository did not appear in the Vercel Git settings. Root
+cause: the Vercel GitHub App did not yet have access to ShelfWatch. Fix:
+granted access to this repository and connected it to the Vercel project.
+After PR #8 merged, Vercel automatically deployed commit `a0253e2` from
+`main`. Lesson: project credentials and Git-provider permissions are separate
+setup steps.
+
+**E23 · Oct 8 · First hosted collection took several minutes.**
+The GitHub Actions run installed Chromium, collected listings, verified that
+the output was non-empty, and ingested the snapshot into Neon. It completed
+successfully with 651 new observations. Production then reported 1,901
+observations and 597 current listings across Chaldal and Shwapno. Lesson:
+wait for the browser-based scraper to finish, then verify both the workflow
+and the live API.
+
+**E24 · Oct 8 · History revealed an implausible price.**
+The production product-history endpoint showed a historical price of
+৳1,000,900 for Golden Harvest Chicken Momo 1kg, followed by ৳900 records.
+This outlier has not been corrected or traced to its source, so it remains a
+data-quality warning rather than a confirmed retailer price. Lesson: inspect
+the history behind surprising values before using it for analysis.
+
+**E25 · Oct 8 · Synthetic model check printed a solver warning.**
+The local baseline self-test completed and reported all three fold scores, but
+scikit-learn printed `OptimizeWarning: Unknown solver options: iprint` during
+the run. The warning did not stop the test; its exact dependency-level cause
+has not been confirmed. Lesson: record warnings as well as exit status, and
+check dependency compatibility before treating the model environment as clean.
+
 ## 3. State as of 2026-10-08
 
-1,250 DB rows over 2 timepoints; 648-row latest snapshot; 619/1250 rows carry
-a pack unit; 17/17 tests green; 3 merged PRs; docs: README + 3 docs files.
-Models cannot train on real data yet (0 positives) — by design this is
-reported, not crashed.
+The production API reported 1,901 observations, 597 current listings, and
+two retailers after the first hosted scrape; the new run added 651
+observations to the 1,250-row migration. The API and dashboard are live on
+Vercel backed by Neon. The GitHub Actions scraper completed successfully.
+The test suite has 26 tests. The baseline has no real performance score:
+all 1,901 stored production observations were marked `in_stock`, below the
+model's requirement of 20 positive labels. Its synthetic self-test averaged
+PR-AUC 0.795 and F2 0.799; these scores only show that the pipeline runs on
+artificial data.
 
 ## 4. Lessons learned (process)
 
@@ -148,8 +222,8 @@ reported, not crashed.
 3. Guards + synthetic selftests keep ML code honest before labels exist.
 4. Tests and README are part of the definition of done.
 5. Branch-per-concern made every fix reviewable and revertible.
-6. Environment quirks (Drive locks, cp1252, missing `gh`) deserve docs, not
-   tribal memory.
+6. Environment quirks (Drive locks, Windows encoding, missing command-line
+   tools, and GitHub permissions) deserve docs, not tribal memory.
 
 ## Appendix A — Entry template
 
@@ -166,4 +240,5 @@ See PROJECT_DOCUMENTATION §7; git commands live in GIT_WORKFLOW.md.
 
 `4be3bb6` scraper correctness merge · `b75a91e` README/parser realignment ·
 PR #1 `69c1e0c` labels+imgs · `693bd81` plumbing merge (pack features, db
-fix) · `684b1ac` baseline model · PR #2 `1e57b4c` · PR #3 `4735a5d` RF+SHAP.
+fix) · `684b1ac` baseline model · PR #2 `1e57b4c` · PR #3 `4735a5d` RF+SHAP
+(experimental) · PR #8 routing and Neon config.
