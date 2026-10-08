@@ -8,6 +8,12 @@ for exploring listings and their history. Data collection and the dashboard
 are running in production. Product matching and predictive alerts are still
 experimental or planned.
 
+
+
+https://github.com/user-attachments/assets/9ee3f09c-4cbb-4e62-9cc6-95e5bdc132cf
+
+
+
 ![Project status: live data dashboard](https://img.shields.io/badge/status-live%20dashboard-brightgreen)
 ![Market: Bangladesh](https://img.shields.io/badge/market-Bangladesh-006a4e)
 ![Python: 3.12](https://img.shields.io/badge/Python-3.12-blue)
