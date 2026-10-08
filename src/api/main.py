@@ -2,12 +2,14 @@
 
 from contextlib import contextmanager
 import os
-import sqlite3
-from typing import Iterator
+import re
+from typing import Generator
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection, URL
 
 from src.features.pack_parser import parse_pack_size
 
@@ -15,6 +17,36 @@ from src.features.pack_parser import parse_pack_size
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 DB_PATH = os.path.join(ROOT_DIR, "shelfwatch.db")
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+
+def _database_engine():
+    database_url = os.environ.get("DATABASE_URL", DATABASE_URL)
+    if database_url:
+        if database_url.startswith("postgres://"):
+            database_url = "postgresql://" + database_url.removeprefix("postgres://")
+        return create_engine(database_url, pool_pre_ping=True)
+    return create_engine(URL.create("sqlite", database=DB_PATH))
+
+
+def _execute(conn: Connection, query: str, params=None):
+    if isinstance(params, (list, tuple)):
+        values = iter(params)
+        bindings = {}
+
+        def bind_placeholder(_match):
+            name = f"p{_match.start()}"
+            bindings[name] = next(values)
+            return f":{name}"
+
+        query = re.sub(r"\?", bind_placeholder, query)
+    else:
+        bindings = params or {}
+    return conn.execute(text(query), bindings)
+
+
+def _all(conn: Connection, query: str, params=None) -> list[dict]:
+    return [dict(row) for row in _execute(conn, query, params).mappings().all()]
 
 app = FastAPI(
     title="ShelfWatch API",
@@ -25,29 +57,45 @@ app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
 
 @contextmanager
-def _connection() -> Iterator[sqlite3.Connection]:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+def _connection() -> Generator[Connection, None, None]:
+    engine = _database_engine()
     try:
-        _require_snapshots(conn)
-        yield conn
+        with engine.connect() as conn:
+            _require_snapshots(conn)
+            yield conn
     finally:
-        conn.close()
+        engine.dispose()
 
 
-def _require_snapshots(conn: sqlite3.Connection) -> None:
-    exists = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'snapshots'"
-    ).fetchone()
+def _require_snapshots(conn: Connection) -> None:
+    if conn.dialect.name == "postgresql":
+        query = """
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = current_schema() AND table_name = 'snapshots'
+        """
+    else:
+        query = """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'snapshots'
+        """
+    exists = _execute(conn, query).first()
     if not exists:
         raise HTTPException(
             status_code=503,
-            detail="The product database is not initialized. Run the scraper and ingest its CSV.",
+            detail="The product database is not initialized. Run a collection and ingest its snapshot.",
         )
 
 
-def _columns(conn: sqlite3.Connection) -> set[str]:
-    return {row["name"] for row in conn.execute("PRAGMA table_info(snapshots)")}
+def _columns(conn: Connection) -> set[str]:
+    if conn.dialect.name == "postgresql":
+        rows = _execute(conn, """
+            SELECT column_name AS name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = 'snapshots'
+        """).mappings().all()
+    else:
+        rows = _execute(conn, "PRAGMA table_info(snapshots)").mappings().all()
+    return {row["name"] for row in rows}
 
 
 LATEST_PRODUCTS = """
@@ -55,7 +103,7 @@ WITH ranked_products AS (
     SELECT id, source, title, price, list_price, discount_percent, stock_flag,
            category_path, category_rank, url, scraped_at,
            ROW_NUMBER() OVER (
-               PARTITION BY source, COALESCE(NULLIF(url, ''), title)
+               PARTITION BY source, lower(title)
                ORDER BY scraped_at DESC, id DESC
            ) AS product_rank
     FROM snapshots
@@ -68,18 +116,23 @@ def dashboard() -> FileResponse:
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(status_code=204)
+
+
 @app.get("/api/health")
 def health() -> dict:
     with _connection() as conn:
-        return {"status": "ok", "observations": conn.execute(
-            "SELECT COUNT(*) FROM snapshots"
-        ).fetchone()[0]}
+        observations = _execute(conn, "SELECT COUNT(*) FROM snapshots").scalar_one()
+        return {"status": "ok", "observations": observations}
 
 
 @app.get("/api/overview")
 def get_overview() -> dict:
     with _connection() as conn:
-        current = conn.execute(
+        current = _execute(
+            conn,
             LATEST_PRODUCTS
             + """
             SELECT COUNT(*) AS products,
@@ -89,14 +142,15 @@ def get_overview() -> dict:
             FROM ranked_products
             WHERE product_rank = 1
             """
-        ).fetchone()
-        observations = conn.execute(
-            "SELECT COUNT(*) FROM snapshots"
-        ).fetchone()[0]
-        latest = conn.execute(
-            "SELECT MAX(scraped_at) FROM snapshots"
-        ).fetchone()[0]
-        retailers = conn.execute(
+        ).mappings().first()
+        observations = _execute(
+            conn, "SELECT COUNT(*) FROM snapshots"
+        ).scalar_one()
+        latest = _execute(
+            conn, "SELECT MAX(scraped_at) FROM snapshots"
+        ).scalar_one()
+        retailers = _all(
+            conn,
             LATEST_PRODUCTS
             + """
             SELECT source, COUNT(*) AS products,
@@ -106,16 +160,18 @@ def get_overview() -> dict:
             GROUP BY source
             ORDER BY source
             """
-        ).fetchall()
-        activity = conn.execute(
+        )
+        activity = _all(
+            conn,
             """
-            SELECT substr(scraped_at, 1, 10) AS day, COUNT(*) AS observations
+            SELECT substr(CAST(scraped_at AS TEXT), 1, 10) AS day,
+                   COUNT(*) AS observations
             FROM snapshots
             GROUP BY day
             ORDER BY day DESC
             LIMIT 14
             """
-        ).fetchall()
+        )
 
     return {
         "products": current["products"] or 0,
@@ -124,8 +180,8 @@ def get_overview() -> dict:
         "unpriced": current["unpriced"] or 0,
         "retailers": current["retailers"] or 0,
         "last_updated": latest,
-        "retailer_breakdown": [dict(row) for row in retailers],
-        "daily_activity": [dict(row) for row in reversed(activity)],
+        "retailer_breakdown": retailers,
+        "daily_activity": list(reversed(activity)),
     }
 
 
@@ -155,18 +211,20 @@ def get_products(
 
     ordering = {
         "recent": "scraped_at DESC, id DESC",
-        "price_low": "price IS NULL, price ASC, title COLLATE NOCASE",
-        "price_high": "price IS NULL, price DESC, title COLLATE NOCASE",
-        "name": "title COLLATE NOCASE ASC",
+        "price_low": "price IS NULL, price ASC, lower(title)",
+        "price_high": "price IS NULL, price DESC, lower(title)",
+        "name": "lower(title) ASC",
     }[sort]
     where = " AND ".join(conditions)
 
     with _connection() as conn:
-        total = conn.execute(
+        total = _execute(
+            conn,
             LATEST_PRODUCTS + f"SELECT COUNT(*) FROM ranked_products WHERE {where}",
             params,
-        ).fetchone()[0]
-        rows = conn.execute(
+        ).scalar_one()
+        rows = _all(
+            conn,
             LATEST_PRODUCTS
             + f"""
             SELECT id, source, title, price, list_price, discount_percent,
@@ -177,10 +235,10 @@ def get_products(
             LIMIT ? OFFSET ?
             """,
             [*params, limit, offset],
-        ).fetchall()
+        )
 
     return {
-        "items": [dict(row) for row in rows],
+        "items": rows,
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -190,38 +248,45 @@ def get_products(
 @app.get("/api/products/{snapshot_id}/history")
 def get_product_history(snapshot_id: int) -> dict:
     with _connection() as conn:
-        product = conn.execute(
+        product = _execute(
+            conn,
             "SELECT source, title, url FROM snapshots WHERE id = ?",
             (snapshot_id,),
-        ).fetchone()
+        ).mappings().first()
         if product is None:
             raise HTTPException(status_code=404, detail="Product snapshot not found.")
 
-        if product["url"]:
-            history = conn.execute(
-                """
-                SELECT id, price, list_price, discount_percent, stock_flag, scraped_at
-                FROM snapshots
-                WHERE source = ? AND url = ?
-                ORDER BY scraped_at, id
-                """,
-                (product["source"], product["url"]),
-            ).fetchall()
-        else:
-            history = conn.execute(
-                """
-                SELECT id, price, list_price, discount_percent, stock_flag, scraped_at
-                FROM snapshots
-                WHERE source = ? AND (url IS NULL OR url = '') AND title = ?
-                ORDER BY scraped_at, id
-                """,
-                (product["source"], product["title"]),
-            ).fetchall()
+        titles = [
+            row["title"]
+            for row in _all(
+                conn,
+                "SELECT DISTINCT title FROM snapshots WHERE source = ?",
+                (product["source"],),
+            )
+            if _pack_family_key(row["title"]) == _pack_family_key(product["title"])
+        ]
+        placeholders = ", ".join("?" for _ in titles)
+        history = _all(
+            conn,
+            f"""
+            SELECT id, title, price, list_price, discount_percent, stock_flag,
+                   scraped_at
+            FROM snapshots
+            WHERE source = ? AND title IN ({placeholders})
+            ORDER BY scraped_at, id
+            """,
+            [product["source"], *titles],
+        )
+
+        history = [
+            {key: value for key, value in row.items() if key != "title"}
+            for row in history
+        ]
 
     return {
         "source": product["source"],
         "title": product["title"],
-        "history": [dict(row) for row in history],
+        "history": history,
     }
 
 
@@ -235,7 +300,8 @@ def get_current_stockouts(
         source_clause = " AND source = ?"
         params.append(source)
     with _connection() as conn:
-        rows = conn.execute(
+        rows = _all(
+            conn,
             LATEST_PRODUCTS
             + """
             SELECT id, source, title, url, price, stock_flag, scraped_at
@@ -243,75 +309,107 @@ def get_current_stockouts(
             WHERE product_rank = 1 AND stock_flag = 'out_of_stock'
             """
             + source_clause
-            + " ORDER BY scraped_at DESC, title COLLATE NOCASE",
+            + " ORDER BY scraped_at DESC, lower(title)",
             params,
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def _shrinkflation_from_features(conn: sqlite3.Connection) -> list[dict]:
-    rows = conn.execute(
-        """
-        WITH product_history AS (
-            SELECT id, source, title, url, price, normalized_amount, normalized_unit,
-                   scraped_at,
-                   LAG(normalized_amount) OVER (
-                       PARTITION BY source, COALESCE(NULLIF(url, ''), title)
-                       ORDER BY scraped_at, id
-                   ) AS previous_amount,
-                   LAG(normalized_unit) OVER (
-                       PARTITION BY source, COALESCE(NULLIF(url, ''), title)
-                       ORDER BY scraped_at, id
-                   ) AS previous_unit
-            FROM snapshots
-            WHERE normalized_amount IS NOT NULL
         )
-        SELECT id, source, title, url, price, normalized_amount, normalized_unit,
-               scraped_at, previous_amount
-        FROM product_history
-        WHERE previous_amount IS NOT NULL
-          AND normalized_amount < previous_amount
-          AND (
-              (normalized_unit IN ('g', 'kg') AND previous_unit IN ('g', 'kg'))
-              OR (normalized_unit IN ('ml', 'l') AND previous_unit IN ('ml', 'l'))
-          )
-        ORDER BY scraped_at DESC
+    return rows
+
+
+_PACK_SIZE_SUFFIX = re.compile(
+    r"(?<!\w)\d+(?:[.,]\d+)?\s*"
+    r"(?:kgs?|kilos?|kilograms?|gms?|grams?|g|ml|millilit(?:er|re)s?|"
+    r"ltrs?|lit(?:er|re)s?|l|pcs?|pieces?|counts?|ct|packs?|sachets?)\b",
+    re.IGNORECASE,
+)
+
+
+def _pack_family_key(title: str) -> str:
+    return " ".join(_PACK_SIZE_SUFFIX.sub(" ", title).casefold().split())
+
+
+def _pack_alerts(rows: list[dict], use_stored_features: bool) -> list[dict]:
+    previous: dict[tuple[str, str], tuple[float, str]] = {}
+    observations: dict[tuple[str, str, str], dict] = {}
+
+    for row in rows:
+        if use_stored_features:
+            amount = row["normalized_amount"]
+            unit = row["normalized_unit"]
+            if amount is None or unit not in ("g", "kg", "ml", "l"):
+                continue
+            dimension = "volume" if unit in ("ml", "l") else "weight"
+        else:
+            _, unit, amount = parse_pack_size(row["title"])
+            if amount is None or unit == "piece":
+                continue
+            dimension = "volume" if unit in ("ml", "l") else "weight"
+
+        family = _pack_family_key(row["title"])
+        timestamp = str(row["scraped_at"])
+        key = (row["source"], family)
+        observation_key = (row["source"], family, timestamp)
+        observations[observation_key] = {
+            **row,
+            "normalized_amount": amount,
+            "normalized_unit": unit,
+            "_family": family,
+            "_dimension": dimension,
+        }
+
+    alerts = []
+    for observation in sorted(
+        observations.values(),
+        key=lambda row: (row["source"], row["scraped_at"], row["id"]),
+    ):
+        key = (observation["source"], observation["_family"])
+        current_amount = observation["normalized_amount"]
+        current_dimension = observation["_dimension"]
+        prior = previous.get(key)
+        if (
+            prior
+            and prior[1] == current_dimension
+            and current_amount < prior[0]
+        ):
+            alerts.append({
+                "id": observation["id"],
+                "source": observation["source"],
+                "title": observation["title"],
+                "url": observation["url"],
+                "price": observation["price"],
+                "normalized_amount": current_amount,
+                "normalized_unit": observation["normalized_unit"],
+                "scraped_at": observation["scraped_at"],
+                "previous_amount": prior[0],
+            })
+        previous[key] = (current_amount, current_dimension)
+
+    return sorted(alerts, key=lambda alert: str(alert["scraped_at"]), reverse=True)
+
+
+def _shrinkflation_from_features(conn: Connection) -> list[dict]:
+    rows = _all(
+        conn,
         """
-    ).fetchall()
-    return [dict(row) for row in rows]
+        SELECT id, source, title, url, price, normalized_amount, normalized_unit,
+               scraped_at
+        FROM snapshots
+        WHERE normalized_amount IS NOT NULL
+        ORDER BY source, scraped_at, id
+        """
+    )
+    return _pack_alerts(rows, use_stored_features=True)
 
 
-def _shrinkflation_from_titles(conn: sqlite3.Connection) -> list[dict]:
-    rows = conn.execute(
+def _shrinkflation_from_titles(conn: Connection) -> list[dict]:
+    rows = _all(
+        conn,
         """
         SELECT id, source, title, url, price, scraped_at
         FROM snapshots
-        ORDER BY source, COALESCE(NULLIF(url, ''), title), scraped_at, id
+        ORDER BY source, lower(title), scraped_at, id
         """
-    ).fetchall()
-    previous: dict[tuple[str, str], tuple[float, str]] = {}
-    alerts = []
-    for row in rows:
-        value, unit, amount = parse_pack_size(row["title"])
-        if amount is None or unit == "piece":
-            continue
-        key = (row["source"], row["url"] or row["title"])
-        prior = previous.get(key)
-        current_dimension = "volume" if unit in ("ml", "l") else "weight"
-        if prior and prior[1] == current_dimension and amount < prior[0]:
-            alerts.append({
-                "id": row["id"],
-                "source": row["source"],
-                "title": row["title"],
-                "url": row["url"],
-                "price": row["price"],
-                "normalized_amount": amount,
-                "normalized_unit": unit,
-                "scraped_at": row["scraped_at"],
-                "previous_amount": prior[0],
-            })
-        previous[key] = (amount, current_dimension)
-    return sorted(alerts, key=lambda alert: alert["scraped_at"], reverse=True)
+    )
+    return _pack_alerts(rows, use_stored_features=False)
 
 
 @app.get("/api/shrinkflation/alerts")

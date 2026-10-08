@@ -26,19 +26,20 @@ Chaldal (SSR)   Shwapno (CSR)    Daraz (opt-in)   Othoba (SSR)
         |-- output/<source>_products.csv
         |-- output/all_products_combined.csv     every row UTC `scraped_at`
         |-- output/history/snapshot_<UTC>.csv    ledger, pruned to HISTORY_KEEP
-      src/storage/db.py — idempotent ingest (SHA-256 run_id -> ingest_log),
-                          preserves UTC stamps, derives pack-size features
-        |-- shelfwatch.db (snapshots, ingest_log)
+      src/storage/db.py — idempotent SQLite/PostgreSQL ingest
+        |-- shelfwatch.db (local) or Neon PostgreSQL (production)
       src/features/label_definitions.sql — stock-out label views
       src/models/ build_features -> train_baseline / train_advanced -> explain_shap
       run_crawler_scheduler.py — 6 h scrape->ingest cycle, lock file, UTF-8 env
-      src/api/main.py — FastAPI: stock-out & shrinkflation query endpoints (uvicorn)
+      src/api/main.py — Vercel FastAPI dashboard/API; DATABASE_URL selects PostgreSQL
+      .github/workflows/scrape-and-ingest.yml — six-hour scraper -> Neon workflow
 ```
 
 Design principles: (1) snapshots are append-only; time travels via
 `scraped_at`. (2) Every ingest/merge is idempotent or explicit. (3) Degrade
-gracefully (fallbacks, guards) instead of crashing mid-pipeline. (4) Data
-stays local (git-ignored); only code, tests and docs travel through Git.
+gracefully (fallbacks, guards) instead of crashing mid-pipeline. (4) Collected
+data stays in a git-ignored local database or a separately configured hosted
+database; credentials and datasets do not travel through Git.
 
 ## 3. Repository map
 
@@ -50,7 +51,8 @@ stays local (git-ignored); only code, tests and docs travel through Git.
 | `scraper/scraper_shwapno.py` | Playwright card extraction with leaf price nodes; HTTP fallback |
 | `scraper/scraper_daraz.py` | Catalog strip + Playwright/HTTP pagination; disabled by default |
 | `scraper/scraper_othoba.py` | nopCommerce cards; title sanitizer; pager-href discovery |
-| `src/storage/db.py` | SQLite schema, idempotent ingest, pack-feature derivation, migration |
+| `src/storage/db.py` | SQLite/PostgreSQL schema and idempotent snapshot ingestion |
+| `src/storage/migrate_to_postgres.py` | One-time migration from local SQLite to an empty hosted database |
 | `src/features/pack_parser.py` | `parse_pack_size`, `calculate_normalized_price` |
 | `src/features/label_definitions.sql` | `sku_status_history`, `valid_stockouts` views |
 | `src/models/build_features.py` | Loads snapshots; temporal/discount/missing features; `target_stockout` |
@@ -61,18 +63,18 @@ stays local (git-ignored); only code, tests and docs travel through Git.
 | `src/api/static/` | Same-origin ShelfWatch market desk (HTML, CSS, vanilla JavaScript) |
 | `src/eda/audit_snapshot.py` | Quick audit of the combined CSV |
 | `run_crawler_scheduler.py` | 6 h loop with `scheduler.lock` |
-| `tests/` | `test_smoke.py` (14) + `test_train_baseline.py` (3) + `test_api.py` (7) = 24 tests |
+| `tests/` | `test_smoke.py` (14) + `test_train_baseline.py` (3) + `test_api.py` (7) + `test_storage.py` (2) = 26 tests |
 | `docs/` | This file, CASE_STUDY.md, GIT_WORKFLOW.md |
 
 ## 4. Data model
 
-### 4.1 `snapshots` (committed schema)
+### 4.1 `snapshots`
 `id` PK · `source` · `title` · `price` · `list_price` · `discount_percent` ·
 `stock_flag` (`in_stock`/`out_of_stock`/`unknown`) · `category_path` ·
-`category_rank` · `url` · `scraped_at` (UTC ISO-8601, NOT NULL) ·
-`normalized_unit` (`g|kg|l|ml|piece|NULL`) · `normalized_amount` (grams/ml) ·
-`price_per_100` (BDT per 100 g/ml). Indexes on `(source, url)` and
-`(scraped_at)`.
+`category_rank` · `url` · `scraped_at` (UTC, NOT NULL). Optional
+`normalized_unit`, `normalized_amount`, and `price_per_100` columns may be
+present in older SQLite databases. The active storage schema indexes
+`(source, url)`, `(source, title)`, and `(scraped_at)`.
 
 ### 4.2 `ingest_log`
 `run_id` = SHA-256 of the CSV bytes (PK), `csv_path`, `rows`, `ingested_at`.
@@ -130,13 +132,22 @@ Politeness: 3 s crawl delay, browser-like User-Agent, Foodpanda excluded
 python scraper/main.py [source...]        # scrape (all or one source)
 python src/storage/db.py                  # ingest combined CSV (idempotent)
 python run_crawler_scheduler.py           # 6 h scrape->ingest loop
-python -m unittest discover -s tests -v   # 24 tests, including API contracts
+python -m unittest discover -s tests -v   # 26 tests, including API/storage contracts
 python src/models/train_baseline.py [--selftest]
 python src/models/train_advanced.py       # needs >=1000 rows & 20 positives
 python src/models/explain_shap.py
 python src/eda/audit_snapshot.py
 uvicorn src.api.main:app --reload       # Dashboard + API on :8000
 ```
+
+Production deployment uses the root `index.py` FastAPI entrypoint on Vercel,
+with Neon PostgreSQL selected through `DATABASE_URL`. The
+`.github/workflows/scrape-and-ingest.yml` workflow runs on a six-hour schedule;
+add `DATABASE_URL` as a GitHub Actions secret before enabling it. To seed the
+hosted database, set `DATABASE_URL` in the local shell and run
+`python -m src.storage.migrate_to_postgres`. The one-time migration preserves
+snapshot IDs and refuses to overwrite a non-empty destination. The full setup
+is documented in the root README.
 
 Windows notes: run Python with `-X utf8` (or `PYTHONUTF8=1`) when output is
 redirected; PowerShell surfaces native stderr as `NativeCommandError` noise —
@@ -166,12 +177,14 @@ the folder on disk — see CASE_STUDY entry E16.
 | 2026-10-08 | Living docs: PROJECT_DOCUMENTATION.md + CASE_STUDY.md | this commit |
 | 2026-10-08 | FastAPI query API: stock-out & shrinkflation endpoints over shelfwatch.db | `src/api/main.py` |
 | 2026-10-08 | Same-origin market dashboard, product search/history, and API contract tests | `src/api/static/`, `tests/test_api.py` |
+| 2026-10-08 | Neon PostgreSQL support, safe SQLite history migration, and scheduled GitHub Actions collection for Vercel | `src/storage/`, `.github/workflows/` |
 
 ## 10. Known limitations & open items
 
-1. **Uncommitted `src/storage/db.py` WIP** removes pack-feature derivation and
-   the pack columns from `CREATE TABLE` (the live DB already has the columns
-   and data). Decide whether to keep or drop the derivation and commit.
+1. New snapshots use the core retailer fields; the hosted migration does not
+   copy legacy normalized-pack columns. The dashboard derives potential
+   pack-size changes from listing titles, which should be reviewed rather than
+   treated as confirmed shrinkflation.
 2. `train_advanced.py` reads `df['stockout']` but features define
    `target_stockout` (KeyError if run); `return` inside the fold loop evaluates
    only fold 1; no single-class guard; `base_estimator=` is deprecated in newer
@@ -185,5 +198,6 @@ the folder on disk — see CASE_STUDY entry E16.
 6. `imgs/` remains locked on disk by Google Drive sync (hidden from git via
    skip-worktree); `git status` may warn "could not open directory 'imgs/'".
 7. Selectors/regexes are markup-sensitive; no license declared yet.
-8. The API is intended for local use and does not provide authentication or
-   rate limiting. Do not expose it directly to an untrusted network.
+8. The read-only API is public when deployed and has no application-level
+   rate limiting. Keep database credentials server-side and use Vercel's
+   platform-level abuse protections before promoting high-traffic use.

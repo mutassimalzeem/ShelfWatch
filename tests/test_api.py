@@ -65,7 +65,7 @@ class TestShelfWatchAPI(unittest.TestCase):
         response = self.client.get("/api/overview")
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["products"], 3)
+        self.assertEqual(data["products"], 4)
         self.assertEqual(data["observations"], 4)
         self.assertEqual(data["out_of_stock"], 1)
         self.assertEqual(data["retailers"], 2)
@@ -77,12 +77,12 @@ class TestShelfWatchAPI(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["total"], 2)
         self.assertEqual(data["items"][0]["title"], "Miniket Rice 900gm")
         self.assertEqual(data["items"][0]["stock_flag"], "out_of_stock")
 
         page = self.client.get("/api/products", params={"limit": 1, "offset": 1})
-        self.assertEqual(page.json()["total"], 3)
+        self.assertEqual(page.json()["total"], 4)
         self.assertEqual(len(page.json()["items"]), 1)
 
     def test_stockouts_returns_latest_stock_flag_not_missing_pack_size(self):
