@@ -1,0 +1,5 @@
+# Runtime dependencies for the FastAPI dashboard and Vercel deployment.
+fastapi==0.115.6
+psycopg2-binary==2.9.10
+SQLAlchemy==2.0.36
+uvicorn==0.34.0

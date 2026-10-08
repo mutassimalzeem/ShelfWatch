@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f1f4f3">
+  <meta name="description" content="A live view of grocery prices and availability across Bangladesh.">
+  <title>ShelfWatch — Grocery market desk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <svg class="icon-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
+    <symbol id="i-bag" viewBox="0 0 24 24"><path d="M5 8h14l1 12H4L5 8Z"/><path d="M9 9V6a3 3 0 0 1 6 0v3"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="m12 3 9 17H3L12 3Z"/><path d="M12 9v5m0 3h.01"/></symbol>
+    <symbol id="i-shrink" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16M8 4 4 7l4 3m8 0 4-3-4-3m-8 7 4 3 4-3m-8 6 4 3 4-3"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.6-2L20 12M4 12l2.8 5a7 7 0 0 0 11.6-2"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+  </svg>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="ShelfWatch home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>Shelf<span class="brand-light">Watch</span></span>
+      </a>
+      <p class="side-caption">Market desk</p>
+      <nav class="main-nav" aria-label="Main navigation">
+        <button class="nav-item is-active" type="button" data-view="overview">
+          <svg><use href="#i-grid"/></svg><span>Market overview</span>
+        </button>
+        <button class="nav-item" type="button" data-view="products">
+          <svg><use href="#i-bag"/></svg><span>Product watch</span><span class="nav-count" id="nav-product-count">—</span>
+        </button>
+        <button class="nav-item" type="button" data-view="stockouts">
+          <svg><use href="#i-alert"/></svg><span>Out of stock</span><span class="nav-count alert-count" id="nav-stock-count">—</span>
+        </button>
+        <button class="nav-item" type="button" data-view="shrinkflation">
+          <svg><use href="#i-shrink"/></svg><span>Pack-size watch</span>
+        </button>
+      </nav>
+      <div class="sidebar-note">
+        <span class="note-dot"></span>
+        <p>Watching the everyday basket across Bangladesh.</p>
+      </div>
+      <div class="sidebar-footer">
+        <span class="market-flag" aria-hidden="true">BD</span>
+        <span>Bangladesh</span>
+        <span class="footer-currency">BDT</span>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="crumb"><span>Market desk</span><span class="crumb-slash">/</span><strong id="page-name">Overview</strong></div>
+        <div class="topbar-actions">
+          <span class="live-indicator"><span></span>Connected to local data</span>
+          <button class="refresh-button" id="refresh-button" type="button" aria-label="Refresh data">
+            <svg><use href="#i-refresh"/></svg><span>Refresh</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="page-wrap">
+        <section class="welcome-row" aria-labelledby="page-title">
+          <div>
+            <p class="date-line" id="today-label">Bangladesh grocery watch</p>
+            <h1 id="page-title">The everyday basket,<br>under watch.</h1>
+          </div>
+          <p class="welcome-copy">A clearer read on prices and shelf availability<br class="desktop-break"> across the retailers people shop every day.</p>
+        </section>
+
+        <section class="pulse-layout" aria-label="Market overview">
+          <article class="pulse-panel">
+            <div class="pulse-heading">
+              <div>
+                <span class="section-kicker">Latest shelf read</span>
+                <h2>What’s on the shelves</h2>
+              </div>
+              <span class="period-tag"><span class="period-dot"></span>From your latest collection</span>
+            </div>
+            <div class="pulse-stats">
+              <div class="main-stat">
+                <span class="stat-number" id="metric-products">—</span>
+                <span class="stat-label">current listings tracked</span>
+              </div>
+              <div class="stat-detail">
+                <span class="stat-number small" id="metric-observations">—</span>
+                <span class="stat-label">price observations collected</span>
+              </div>
+              <div class="stat-detail">
+                <span class="stat-number small" id="metric-stockouts">—</span>
+                <span class="stat-label">currently marked unavailable</span>
+              </div>
+            </div>
+            <div class="chart-heading">
+              <span>Collection activity</span>
+              <span id="chart-caption">Daily product observations</span>
+            </div>
+            <div class="activity-chart" id="activity-chart" role="img" aria-label="Daily product observation activity">
+              <p class="chart-empty">Waiting for collection data</p>
+            </div>
+            <div class="chart-foot">
+              <span id="chart-start"></span><span id="chart-end"></span>
+            </div>
+          </article>
+
+          <aside class="retailer-panel" aria-labelledby="retailer-heading">
+            <div class="retailer-heading">
+              <div><span class="section-kicker">Sources</span><h2 id="retailer-heading">Retailers</h2></div>
+              <span class="retailer-total" id="retailer-total">—</span>
+            </div>
+            <div class="retailer-list" id="retailer-list">
+              <p class="muted-copy">Loading retailer data…</p>
+            </div>
+            <div class="retailer-foot">
+              <span>Last collection</span>
+              <strong id="last-updated">Waiting for data</strong>
+            </div>
+          </aside>
+        </section>
+
+        <section class="ledger-section" id="product-ledger" aria-labelledby="ledger-title">
+          <div class="ledger-heading">
+            <div>
+              <span class="section-kicker" id="ledger-kicker">A live view of the latest listings</span>
+              <h2 id="ledger-title">Product watch</h2>
+            </div>
+            <span class="result-count" id="result-count" aria-live="polite">Loading listings…</span>
+          </div>
+          <div class="filter-bar">
+            <label class="search-box">
+              <svg><use href="#i-search"/></svg>
+              <span class="sr-only">Search products</span>
+              <input id="search-input" type="search" placeholder="Search a product or category" autocomplete="off">
+              <kbd>/</kbd>
+            </label>
+            <label class="filter-select">
+              <span class="sr-only">Retailer</span>
+              <select id="source-filter"><option value="">All retailers</option></select>
+            </label>
+            <label class="filter-select">
+              <span class="sr-only">Availability</span>
+              <select id="stock-filter">
+                <option value="">Any availability</option>
+                <option value="in_stock">Available</option>
+                <option value="out_of_stock">Out of stock</option>
+                <option value="unknown">Not reported</option>
+              </select>
+            </label>
+            <label class="filter-select sort-select">
+              <span class="sr-only">Sort products</span>
+              <select id="sort-select">
+                <option value="recent">Most recent</option>
+                <option value="price_low">Price: low to high</option>
+                <option value="price_high">Price: high to low</option>
+                <option value="name">Name: A to Z</option>
+              </select>
+            </label>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th scope="col">Product</th><th scope="col">Retailer</th><th scope="col">Price</th><th scope="col">Availability</th><th scope="col">Collected</th><th><span class="sr-only">Details</span></th></tr></thead>
+              <tbody id="product-rows"><tr><td class="table-message" colspan="6">Loading listings…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="ledger-footer">
+            <span id="page-summary">—</span>
+            <div class="pagination">
+              <button id="previous-page" type="button" disabled>Previous</button>
+              <span id="page-number">1</span>
+              <button id="next-page" type="button" disabled>Next</button>
+            </div>
+          </div>
+        </section>
+        <footer class="page-footer">
+          <span>Price and availability reflect the latest captured listing, not a live store guarantee.</span>
+          <span>Amounts shown in Bangladeshi taka (৳)</span>
+        </footer>
+      </div>
+    </main>
+  </div>
+
+  <dialog class="history-dialog" id="history-dialog" aria-labelledby="history-title">
+    <div class="dialog-head">
+      <div><span class="section-kicker" id="history-source">Product history</span><h2 id="history-title">Price over time</h2></div>
+      <button type="button" class="dialog-close" id="dialog-close" aria-label="Close product history">×</button>
+    </div>
+    <div class="history-chart" id="history-chart"></div>
+    <div class="history-list" id="history-list"></div>
+  </dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -3,12 +3,11 @@
 **Price and shelf-availability intelligence for Bangladesh grocery retail.**
 
 ShelfWatch collects publicly visible product listings from selected Bangladeshi
-retail websites, keeps timestamped snapshots, and stores them locally for later
-comparison and analysis. The project is currently focused on building a
-reliable data-collection foundation; cross-retailer product matching, price
-analytics, and production-ready predictive features remain future work. A
-baseline stock-out model is available for offline evaluation as the data
-history grows.
+retail websites, keeps timestamped snapshots, and provides a market dashboard
+for exploring current listings and their history. The project is focused on a
+reliable data-collection foundation; cross-retailer product matching and
+production-ready predictive features remain future work. A baseline stock-out
+model is available for offline evaluation as the data history grows.
 
 ![Project status: in progress](https://img.shields.io/badge/status-in%20progress-yellow)
 ![Market: Bangladesh](https://img.shields.io/badge/market-Bangladesh-006a4e)
@@ -20,17 +19,17 @@ history grows.
 |---|---|
 | Product collection | Scrapers are present for Chaldal, Shwapno, Daraz BD, and Othoba |
 | Default enabled sources | Chaldal, Shwapno, and Othoba; Daraz is opt-in |
-| Latest local data observed | 648 rows: 349 Chaldal and 299 Shwapno, from October 6, 2026 |
+| Latest local data observed | 1,250 observations: 698 Chaldal and 552 Shwapno |
 | Snapshot history | Timestamped CSV snapshots; configured to retain up to 60 |
-| Storage | Local SQLite database with content-hash ingestion deduplication |
+| Storage | Local SQLite or hosted PostgreSQL; content-hash ingestion deduplication |
 | Analysis | A basic data-audit script and a standalone pack-size parser are present |
 | Modeling | A regularized logistic-regression stock-out baseline with temporal cross-validation |
-| Automated tests | Stdlib smoke tests, passing (re-aligned to the parser API on October 7, 2026) |
-| Dashboards / production predictions | Not implemented yet |
+| Automated tests | 26 unit/API/storage tests |
+| API layer | FastAPI dashboard and read-only listing/history/alert endpoints |
+| Production deployment | Vercel + Neon + scheduled GitHub Actions; credentials and deployment setup required |
 
-The row counts above describe the local, ignored output files available when
-this README was updated. They are a progress checkpoint, not a promise about
-future scrape sizes, and the data files are not included in Git.
+Local row counts vary as new snapshots are collected; data files are ignored
+by Git and are not included in the repository.
 
 ## Project goals
 
@@ -65,8 +64,10 @@ flowchart LR
     S --> L[Per-source CSV files]
     S --> CMB[Combined CSV]
     CMB --> H[Timestamped history snapshots]
-    CMB --> I[SQLite ingestion]
-    I --> DB[(shelfwatch.db)]
+    CMB --> I[Idempotent ingestion]
+    I --> DB[(SQLite or PostgreSQL)]
+    DB --> API[FastAPI dashboard and API]
+    S -. scheduled GitHub Actions .-> I
     DB -. future analysis .-> F[Product matching and price intelligence]
 ```
 
@@ -125,7 +126,15 @@ Run these commands from the repository root.
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 python -m pip install -r scraper\requirements.txt
+```
+
+The small root requirements file is for the API and hosted deployment. To
+install the full modelling and development environment as well:
+
+```powershell
+python -m pip install -r requirements-project.txt
 ```
 
 To enable the Playwright browser used by Shwapno:
@@ -140,9 +149,13 @@ python -m playwright install chromium
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 python -m pip install -r scraper/requirements.txt
 python -m playwright install chromium  # optional, for Shwapno
 ```
+
+Install `requirements-project.txt` as well when using the modelling or full
+development toolchain.
 
 ## Running ShelfWatch
 
@@ -220,12 +233,16 @@ separate backup if the local history is important.
   configured crawl delay.
 - Combined CSV output with a UTC scrape timestamp and a rolling snapshot
   history (60 snapshots by default).
-- SQLite snapshot storage with content-hash-based duplicate-ingestion
-  protection.
+- SQLite/PostgreSQL snapshot storage with content-hash-based
+  duplicate-ingestion protection.
 - A six-hour scheduler with a lock file and UTF-8 child-process settings.
 - A basic audit script and a standalone pack-size / normalized-price utility.
 - A regularized logistic-regression stock-out baseline evaluated with
   time-ordered folds; it guards against insufficient or single-class labels.
+- A responsive same-origin dashboard with API-backed retailer summaries,
+  searchable latest listings, product history, and potential pack-size alerts.
+- An optional Neon PostgreSQL deployment path, SQLite history migration, and
+  six-hour GitHub Actions collection workflow.
 
 ### Known limitations and validation note
 
@@ -234,15 +251,14 @@ separate backup if the local history is important.
   default.
 - Site markup and selectors can change, and collected stock flags may not
   represent real-time inventory.
-- Product matching across retailers and pack-size normalization are not yet
-  integrated into the collection/storage pipeline.
+- Cross-retailer product matching remains a future feature. The dashboard's
+  possible pack-size alerts use title-family matching and should be reviewed.
 - The stock-out baseline is an offline evaluation, not a deployed predictor.
   It needs at least 1,000 snapshot rows and 20 positive `out_of_stock` labels;
   single-class training folds are skipped, while single-class test folds are
   fitted but excluded from metrics.
-- The smoke-test suite was re-aligned to the current parser API
-  (`parse_pack_size` / `calculate_normalized_price`) on October 7, 2026 and is
-  green again; keep it passing as a validation gate before merging branches.
+-   Keep the unit, API, and storage tests passing as a validation gate before
+  merging branches.
 
 ## Baseline stock-out model
 
@@ -294,7 +310,7 @@ The sequence below is a working direction, not a fixed delivery schedule.
 | 4 | Add product identity and cross-retailer matching | Compare like-for-like products rather than raw titles |
 | 5 | Expand data-quality checks and historical trend summaries | Establish reliable signals before modeling |
 | 6 | Explore price/availability alerts and forecasting | Deliver consumer-facing intelligence when coverage supports it |
-| 7 | Add operational monitoring and automated project checks | Make scheduled collection easier to maintain |
+| 7 | Add monitoring and automated project checks around scheduled collection | Make scheduled collection easier to maintain |
 
 ## Tests
 
@@ -304,6 +320,9 @@ Run the smoke tests from the repository root:
 python -m unittest discover -s tests -v
 ```
 
+Install `requirements-project.txt` for the full test and modelling
+dependencies.
+
 `python src/models/train_baseline.py --selftest` exercises the modelling
 pipeline end-to-end on a deterministic synthetic fixture (no retailer
 contact, no database needed). When the stored snapshots contain too few
@@ -311,6 +330,69 @@ stock-out events the trainer exits gracefully with guidance instead of
 raising a single-class error.
 
 Tests that contact retailer websites are not required for this command.
+
+## API
+
+A FastAPI application in `src/api/main.py` serves the market dashboard and
+read-only query endpoints. It uses local SQLite by default, or PostgreSQL when
+`DATABASE_URL` is configured. Start ShelfWatch from the repository root:
+
+```bash
+uvicorn src.api.main:app --reload
+```
+
+Open `http://127.0.0.1:8000` for the dashboard, or
+`http://127.0.0.1:8000/docs` for the interactive API reference.
+
+| Endpoint | Description |
+|---|---|
+| `GET /` | ShelfWatch dashboard |
+| `GET /api/health` | API and stored observation count |
+| `GET /api/overview` | Current product, stock, retailer, and collection-activity summary |
+| `GET /api/products` | Latest listings; supports search, retailer, stock, sort, and pagination filters |
+| `GET /api/products/{snapshot_id}/history` | Price and availability history for a product |
+| `GET /api/stockouts/current` | Latest products explicitly marked `out_of_stock` |
+| `GET /api/shrinkflation/alerts` | Products with a smaller comparable pack-size observation |
+
+The dashboard uses the latest stored snapshot and does not start scraping
+retailer sites. Availability and prices are observations, not guarantees of
+live store inventory. Potential pack-size alerts compare retailer listings by
+product-family title; review them before treating them as confirmed changes.
+
+## Vercel production deployment
+
+The dashboard and FastAPI read-only API can run on Vercel, backed by Neon
+PostgreSQL. GitHub Actions runs the existing polite scraper every six hours
+and ingests its snapshots into Neon. Local development continues to use
+`shelfwatch.db` unless `DATABASE_URL` is set.
+
+1. Create a Neon PostgreSQL database and copy its pooled PostgreSQL connection
+   string (including `sslmode=require`).
+2. Add that value as the `DATABASE_URL` GitHub Actions secret in
+   **Settings → Secrets and variables → Actions**. Add the same environment
+   variable to the Vercel project for Production (and Preview if desired).
+   Never commit or paste the connection string into source control.
+3. With the full project dependencies installed, copy the existing local
+   snapshot history into an empty Neon database from PowerShell:
+
+   ```powershell
+   $env:DATABASE_URL = "postgresql://USER:PASSWORD@HOST/DB?sslmode=require"
+   python -m src.storage.migrate_to_postgres
+   Remove-Item Env:DATABASE_URL
+   ```
+
+   The migration refuses to run if the destination already contains snapshot
+   rows. Keep the local SQLite database as a backup.
+4. Import this GitHub repository into Vercel. The root `index.py` is the
+   FastAPI entrypoint. After configuring `DATABASE_URL`, deploy the production
+   branch.
+5. Merge the deployment branch into the repository's default branch to enable
+   the scheduled GitHub Actions workflow. Run **Actions → Scrape and ingest
+   grocery listings → Run workflow** once to verify the first hosted cycle.
+
+The scheduled workflow requires the `DATABASE_URL` Actions secret and exits
+explicitly if collection produces no snapshot. It does not run the scraper
+inside Vercel functions.
 
 ## Project documentation
 
@@ -337,9 +419,12 @@ reviewing the impact. Foodpanda is excluded from the configured sources.
 ```text
 scraper/                 Retailer scrapers, configuration, and scraper guide
 src/features/            Pack-size parsing utilities
-src/storage/             SQLite schema and CSV ingestion
+src/storage/             SQLite/PostgreSQL schema, CSV ingestion, and history migration
 src/eda/                 Basic data-audit script
 src/models/              Stock-out baseline model and feature builder
+index.py                 Vercel FastAPI entrypoint
+src/api/                 FastAPI API and same-origin market dashboard
+src/api/static/          Dashboard markup, styles, and browser interactions
 tests/                   Stdlib smoke tests
 docs/                    Development workflow notes
 run_crawler_scheduler.py Six-hour scrape-and-ingest scheduler
