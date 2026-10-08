@@ -383,12 +383,14 @@ and ingests its snapshots into Neon. Local development continues to use
 
    The migration refuses to run if the destination already contains snapshot
    rows. Keep the local SQLite database as a backup.
-4. Import this GitHub repository into Vercel. The root `index.py` is the
-   FastAPI entrypoint. After configuring `DATABASE_URL`, deploy the production
-   branch.
-5. Merge the deployment branch into the repository's default branch to enable
-   the scheduled GitHub Actions workflow. Run **Actions → Scrape and ingest
-   grocery listings → Run workflow** once to verify the first hosted cycle.
+4. Link the GitHub repository to a Vercel project. The Vercel Python function
+   is `api/index.py`; `vercel.json` routes dashboard, API, and asset requests
+   through FastAPI. Add `DATABASE_URL` as a Vercel Production (and Preview,
+   if needed) secret before deploying.
+5. Ensure the deployment branch is merged into the repository's default
+   branch to enable the scheduled GitHub Actions workflow. Run **Actions →
+   Scrape and ingest grocery listings → Run workflow** once to verify the
+   first hosted cycle.
 
 The scheduled workflow requires the `DATABASE_URL` Actions secret and exits
 explicitly if collection produces no snapshot. It does not run the scraper
@@ -422,7 +424,9 @@ src/features/            Pack-size parsing utilities
 src/storage/             SQLite/PostgreSQL schema, CSV ingestion, and history migration
 src/eda/                 Basic data-audit script
 src/models/              Stock-out baseline model and feature builder
-index.py                 Vercel FastAPI entrypoint
+api/index.py             Vercel FastAPI function entrypoint
+vercel.json              Route all public paths through the FastAPI app
+neon.ts                  Neon project configuration
 src/api/                 FastAPI API and same-origin market dashboard
 src/api/static/          Dashboard markup, styles, and browser interactions
 tests/                   Stdlib smoke tests

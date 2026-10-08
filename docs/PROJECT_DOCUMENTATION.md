@@ -32,6 +32,8 @@ Chaldal (SSR)   Shwapno (CSR)    Daraz (opt-in)   Othoba (SSR)
       src/models/ build_features -> train_baseline / train_advanced -> explain_shap
       run_crawler_scheduler.py — 6 h scrape->ingest cycle, lock file, UTF-8 env
       src/api/main.py — Vercel FastAPI dashboard/API; DATABASE_URL selects PostgreSQL
+      api/index.py + vercel.json — Vercel Python function and catch-all app routing
+      neon.ts — Neon project policy configuration
       .github/workflows/scrape-and-ingest.yml — six-hour scraper -> Neon workflow
 ```
 
@@ -60,6 +62,9 @@ database; credentials and datasets do not travel through Git.
 | `src/models/train_advanced.py` | Calibrated random forest (isotonic, cv=5), threshold 0.35 |
 | `src/models/explain_shap.py` | TreeExplainer over the RF; prints plotting instructions |
 | `src/api/main.py` | FastAPI app and dashboard; summary, latest products, product history, stock-out and pack-size-alert endpoints |
+| `api/index.py` | Vercel Python function entrypoint for the FastAPI app |
+| `vercel.json` | Rewrites all app routes to the FastAPI function |
+| `neon.ts` | Neon config entrypoint; currently declares no additional services or branch policies |
 | `src/api/static/` | Same-origin ShelfWatch market desk (HTML, CSS, vanilla JavaScript) |
 | `src/eda/audit_snapshot.py` | Quick audit of the combined CSV |
 | `run_crawler_scheduler.py` | 6 h loop with `scheduler.lock` |
@@ -140,7 +145,8 @@ python src/eda/audit_snapshot.py
 uvicorn src.api.main:app --reload       # Dashboard + API on :8000
 ```
 
-Production deployment uses the root `index.py` FastAPI entrypoint on Vercel,
+Production deployment uses `api/index.py` as the Vercel Python function and
+`vercel.json` to rewrite all dashboard/API/static-asset paths through FastAPI,
 with Neon PostgreSQL selected through `DATABASE_URL`. The
 `.github/workflows/scrape-and-ingest.yml` workflow runs on a six-hour schedule;
 add `DATABASE_URL` as a GitHub Actions secret before enabling it. To seed the
@@ -178,6 +184,7 @@ the folder on disk — see CASE_STUDY entry E16.
 | 2026-10-08 | FastAPI query API: stock-out & shrinkflation endpoints over shelfwatch.db | `src/api/main.py` |
 | 2026-10-08 | Same-origin market dashboard, product search/history, and API contract tests | `src/api/static/`, `tests/test_api.py` |
 | 2026-10-08 | Neon PostgreSQL support, safe SQLite history migration, and scheduled GitHub Actions collection for Vercel | `src/storage/`, `.github/workflows/` |
+| 2026-10-08 | Vercel Python function routing and Neon CLI project setup | `api/index.py`, `vercel.json`, `neon.ts` |
 
 ## 10. Known limitations & open items
 

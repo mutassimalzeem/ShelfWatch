@@ -77,3 +77,7 @@ _*.py
 _*.txt
 _*.bat
 scheduler.lock
+.neon
+
+.vercel
+.env*
