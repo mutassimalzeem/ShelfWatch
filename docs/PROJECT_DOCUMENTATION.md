@@ -1,7 +1,8 @@
 # ShelfWatch — Project Documentation
 
-> **Living document.** Updated 2026-10-08 after production deployment from
-> `main` @ `a0253e2`.
+> **Living document.** Updated 2026-10-13 after V2 market-intelligence
+> deployment from `main` @ `c01adfc` (PR #10) and schema fix `63fb471`
+> (PR #11).
 > Companions: [CASE_STUDY.md](CASE_STUDY.md) (problems & lessons narrative) ·
 > [GIT_WORKFLOW.md](GIT_WORKFLOW.md) (branch/commit/push conventions) ·
 > [model_card.md](model_card.md) (model results and limitations) ·
@@ -29,7 +30,8 @@ Chaldal (SSR)   Shwapno (CSR)    Daraz (opt-in)   Othoba (JS-rendered)
         |-- output/<source>_products.csv
         |-- output/all_products_combined.csv     every row UTC `scraped_at`
         |-- output/history/snapshot_<UTC>.csv    ledger, pruned to HISTORY_KEEP
-      src/storage/db.py — idempotent SQLite/PostgreSQL ingest
+      src/storage/db.py — idempotent SQLite/PostgreSQL ingest; collection-run
+        |                   and source-health recording; pack columns at init
         |-- shelfwatch.db (local) or Neon PostgreSQL (production)
       src/features/label_definitions.sql — stock-out label views
       src/models/ build_features -> train_baseline / train_advanced -> explain_shap
@@ -152,7 +154,7 @@ Politeness: 3 s crawl delay, browser-like User-Agent, Foodpanda excluded
 python scraper/main.py [source...]        # scrape (all or one source)
 python src/storage/db.py                  # ingest combined CSV (idempotent)
 python run_crawler_scheduler.py           # 6 h scrape->ingest loop
-python -m unittest discover -s tests -v   # 26 tests, including API/storage contracts
+python -m unittest discover -s tests -v   # 28 tests, including API/storage contracts
 python src/models/train_baseline.py [--selftest]
 python src/models/train_advanced.py       # needs >=1000 rows & 20 positives
 python src/models/explain_shap.py
@@ -210,12 +212,16 @@ the folder on disk — see CASE_STUDY entry E16.
 | 2026-10-08 | Vercel Python function routing and Neon CLI project setup | `api/index.py`, `vercel.json`, `neon.ts` |
 | 2026-10-08 | Migrate 1,250 local observations; connect Vercel GitHub integration; first hosted collection adds 651 rows; production smoke checks | PR #8, workflow run #1 |
 | 2026-10-08 | Document production status, model score limits, and deployment lessons | README, CASE_STUDY.md, model_card.md, runbook.md |
+| 2026-10-13 | V2 market-intelligence endpoints: price moves, promotions, pack-size changes, availability events, data quality, collection runs, source health, sources | PR #10 (`f772ab0`) |
+| 2026-10-13 | Collection-run and source-health observability tables; pack-intelligence columns at storage init | PR #10 (`f772ab0`) |
+| 2026-10-13 | PostgreSQL schema compatibility fix (identity columns, safe column upgrade) | PR #11 (`63fb471`) |
+| 2026-10-13 | Production Neon migration: `collection_runs`, `source_health`, six pack columns on `snapshots` | migration `31cc4473` |
 
 ## 10. Known limitations & open items
 
-1. New snapshots use the core retailer fields; the hosted migration does not
-   copy legacy normalized-pack columns. The dashboard derives potential
-   pack-size changes from listing titles, which should be reviewed rather than
+1. The hosted migration did not copy legacy normalized-pack columns; they
+   were added to production via the 2026-10-13 additive migration. Pack-size
+   changes are derived from listing titles and should be reviewed rather than
    treated as confirmed shrinkflation.
 2. `train_advanced.py` reads `df['stockout']` but features define
    `target_stockout` (KeyError if run); `return` inside the fold loop evaluates
@@ -234,8 +240,8 @@ the folder on disk — see CASE_STUDY entry E16.
    rate limiting. Keep database credentials server-side and use Vercel's
    platform-level abuse protections before promoting high-traffic use.
 9. Production count is a snapshot, not a promise that every collection returns
-   the same number of products. At the recorded check: 1,901 observations,
-   all marked `in_stock`, and 597 current listings.
+   the same number of products. At the 2026-10-13 check: 8,599 observations,
+   all marked `in_stock`, and 614 current listings.
 10. A product-history record contained a suspicious historical price of
     ৳1,000,900 for a 1kg chicken momo product. The cause is unverified; do not
     use this record as a confirmed price until its source data is checked.
