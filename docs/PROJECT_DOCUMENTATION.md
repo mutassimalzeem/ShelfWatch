@@ -71,7 +71,7 @@ database; credentials and datasets do not travel through Git.
 | `src/api/static/` | Same-origin ShelfWatch market desk (HTML, CSS, vanilla JavaScript) |
 | `src/eda/audit_snapshot.py` | Quick audit of the combined CSV |
 | `run_crawler_scheduler.py` | 6 h loop with `scheduler.lock` |
-| `tests/` | `test_smoke.py` (14) + `test_train_baseline.py` (3) + `test_api.py` (7) + `test_storage.py` (2) = 26 tests |
+| `tests/` | `test_smoke.py` (14) + `test_train_baseline.py` (3) + `test_api.py` (7) + `test_storage.py` (4) = 28 tests |
 | `docs/` | This file, CASE_STUDY.md, GIT_WORKFLOW.md |
 
 ## 4. Data model
@@ -79,9 +79,10 @@ database; credentials and datasets do not travel through Git.
 ### 4.1 `snapshots`
 `id` PK · `source` · `title` · `price` · `list_price` · `discount_percent` ·
 `stock_flag` (`in_stock`/`out_of_stock`/`unknown`) · `category_path` ·
-`category_rank` · `url` · `scraped_at` (UTC, NOT NULL). Optional
-`normalized_unit`, `normalized_amount`, and `price_per_100` columns may be
-present in older SQLite databases. The active storage schema indexes
+`category_rank` · `url` · `scraped_at` (UTC, NOT NULL). Pack intelligence
+columns are added when an existing database is initialized:
+`normalized_amount`, `normalized_unit`, `pack_parse_status`, `price_per_100`,
+`price_per_unit`, and `unit_price_basis`. The active storage schema indexes
 `(source, url)`, `(source, title)`, and `(scraped_at)`.
 
 ### 4.2 `ingest_log`
@@ -89,19 +90,25 @@ present in older SQLite databases. The active storage schema indexes
 Re-ingesting identical content is a no-op, which makes scheduler retries and
 manual re-runs safe.
 
-### 4.3 History ledger
+### 4.3 Collection health
+`collection_runs` stores run-level results and `source_health` stores
+source-level quality signals. Both are created by storage initialization in
+SQLite and PostgreSQL; PostgreSQL uses identity columns for generated health
+record IDs.
+
+### 4.4 History ledger
 `output/history/snapshot_<YYYYmmdd_HHMMSS>.csv`; oldest files pruned beyond
 `HISTORY_KEEP` (60). The ledger is the on-disk time-series source of truth;
 the DB is the queryable copy.
 
-### 4.4 Label views (`label_definitions.sql`)
+### 4.5 Label views (`label_definitions.sql`)
 `sku_status_history`: per `url`, LAG-1/LAG-2 of `stock_flag` ordered by
 `scraped_at`. `valid_stockouts`: rows whose current **and** previous flag are
 `out_of_stock` (a de-bounced "true" stock-out). The training path currently
 builds `target_stockout` directly from `stock_flag`; the views define the
 agreed label semantics for future work.
 
-### 4.5 Time semantics
+### 4.6 Time semantics
 All pipeline stamps are UTC. Legacy local-naive stamps were a bug (5–6 h
 skew) and were removed; do not reintroduce `pd.Timestamp.now()` in ingestion.
 
