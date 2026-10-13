@@ -203,10 +203,14 @@ Tests do not need to contact retailer websites.
 ## API
 
 A FastAPI application serves the dashboard and read-only API. It uses SQLite
-locally or PostgreSQL when `DATABASE_URL` is set. The main endpoints are:
+locally or PostgreSQL when `DATABASE_URL` is set. The V2 API includes
+`/api/data-quality`, `/api/collection-runs`, `/api/source-health`,
+`/api/availability/events`, `/api/prices/moves`, `/api/promotions`, and
+`/api/pack-size/changes`, alongside the overview, product, stockout, and
+history endpoints. Storage initialization creates the collection-health
+tables and adds missing pack-intelligence columns to existing databases.
 
-`/api/health`, `/api/overview`, `/api/products`, and product history. See
-`/docs` in the running app for the full interactive API reference.
+See `/docs` in the running app for the full interactive API reference.
 
 ## Production setup
 
