@@ -1,6 +1,8 @@
 # ShelfWatch
 
-**Price and shelf-availability intelligence for Bangladesh grocery retail.**
+**Bangladesh Grocery Market Intelligence.** Track what retailers list, what
+they charge, how pack sizes change, and when availability or pricing shifts —
+with historical evidence behind every signal.
 
 ShelfWatch collects publicly visible product listings from selected Bangladeshi
 retail websites, keeps timestamped snapshots, and provides a live dashboard
@@ -24,13 +26,13 @@ https://github.com/user-attachments/assets/9ee3f09c-4cbb-4e62-9cc6-95e5bdc132cf
 |---|---|
 | Product collection | Scrapers are present for Chaldal, Shwapno, Daraz BD, and Othoba |
 | Default enabled sources | Chaldal, Shwapno, and Othoba; Daraz is opt-in |
-| Production data checked | 1,901 observations and 597 current listings across Chaldal and Shwapno (Oct 8, 2026) |
+| Production data checked | 8,599 observations and 614 current listings across Chaldal and Shwapno (Oct 13, 2026) |
 | Snapshot history | Timestamped CSV snapshots; configured to retain up to 60 |
 | Storage | Local SQLite or hosted PostgreSQL; content-hash ingestion deduplication |
 | Analysis | A basic data-audit script and a standalone pack-size parser are present |
 | Modeling | An offline stock-out baseline; no measured real-data score yet |
-| Automated tests | 26 unit, API, and storage tests |
-| API layer | FastAPI dashboard and read-only listing/history/alert endpoints |
+| Automated tests | 28 unit, API, and storage tests |
+| API layer | FastAPI dashboard and read-only listing/history/alert endpoints plus V2 market-intelligence endpoints (price moves, promotions, pack-size changes, availability events, data quality, collection health) |
 | Production deployment | Live on Vercel, backed by Neon; GitHub Actions collects data every six hours |
 
 Production counts are a point-in-time snapshot and change after collection
@@ -57,8 +59,8 @@ collection:
 | Check | Result |
 |---|---:|
 | API health | OK |
-| Stored observations | 1,901 |
-| Current listings | 597 |
+| Stored observations | 8,599 |
+| Current listings | 614 |
 | Retailers with data | 2 |
 | Current out-of-stock listings | 0 |
 | First hosted scraper run | Success; added 651 observations |
@@ -80,7 +82,7 @@ show how well the model predicts real stock-outs.
   listings. Higher is better.
 - **F2** combines precision and recall, giving more weight to finding
   stock-outs. Higher is better.
-- The real production data had **0 out-of-stock labels in 1,901 observations**
+- The real production data had **0 out-of-stock labels in 8,599 observations**
   at the time of this check. There is not enough labeled data to calculate a
   real model score or train a useful predictor. See the
   [model card](docs/model_card.md) for details.
@@ -88,9 +90,12 @@ show how well the model predicts real stock-outs.
 ## What ShelfWatch does
 
 ShelfWatch collects publicly visible grocery listings, saves timestamped price
-and availability observations, and shows them in a dashboard. The hosted
-collection runs every six hours. Matching the same product across retailers
-and reliable forecasting are future goals, not current features.
+and availability observations, normalizes pack sizes into unit prices, detects
+price movements and promotions, flags potential pack-size changes, tracks
+availability events, and surfaces collection health — all through a live
+dashboard and API. The hosted collection runs every six hours. Matching the
+same product across retailers and reliable forecasting are future goals, not
+current features.
 
 ## Data sources and collection methods
 
@@ -175,15 +180,19 @@ individual scraper commands, and the optional local scheduler.
 ## What is ready—and what is not
 
 - **Ready:** retailer collection, timestamped history, SQLite/PostgreSQL
-  storage, a live dashboard, and read-only API endpoints.
-- **Experimental:** the offline stock-out model and possible pack-size alerts.
-- **Not ready:** reliable cross-retailer product matching or real-world stock
-  forecasts. Retailer availability can be stale, and some sites change their
-  pages or block automated requests.
+  storage, a live dashboard, read-only API endpoints, V2 market-intelligence
+  endpoints (price moves, promotions, pack-size changes, availability events,
+  data quality, collection health), pack-size normalization at ingestion,
+  and collection-run observability.
+- **Experimental:** the offline stock-out model (no real labels yet) and
+  pack-size change detection (potential changes, not confirmed shrinkflation).
+- **Not ready:** reliable cross-retailer product matching, real-world stock
+  forecasts, or a verified gold-label dataset. Retailer availability can be
+  stale, and some sites change their pages or block automated requests.
 
 ## Tests
 
-Run the smoke tests from the repository root:
+Run the full test suite from the repository root:
 
 ```bash
 python -m unittest discover -s tests -v
