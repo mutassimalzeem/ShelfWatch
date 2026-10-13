@@ -1,17 +1,16 @@
 # docker-compose.yml
-version: '3.8'
+# NOTE: No volume mounts — the Google Drive synced folder (I:\My Drive\...)
+# is a virtual/placeholder filesystem that Docker Desktop cannot bind-mount
+# reliably (files appear missing inside the container). The image already
+# contains the full codebase via `COPY . .` in the Dockerfile.
 
 services:
   api:
     build: .
     ports:
       - "8000:8000"
-    volumes:
-      - .:/app
-    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 
   scraper_cron:
     build: .
-    volumes:
-      - .:/app
     command: python run_crawler_scheduler.py

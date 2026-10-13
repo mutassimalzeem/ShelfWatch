@@ -9,9 +9,65 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine, URL
 
+from src.features.pack_parser import (
+    calculate_normalized_price,
+    calculate_price_per_unit,
+    parse_pack_size_details,
+)
+
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DB_PATH = os.path.join(ROOT_DIR, "shelfwatch.db")
+
+
+def _clean_numeric(value):
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
+def _prepare_pack_columns(df: pd.DataFrame) -> pd.DataFrame:
+    for column in (
+        "normalized_amount",
+        "normalized_unit",
+        "pack_parse_status",
+        "price_per_100",
+        "price_per_unit",
+        "unit_price_basis",
+    ):
+        if column not in df.columns:
+            df[column] = None
+
+    for index, row in df.iterrows():
+        details = parse_pack_size_details(row.get("title") or "")
+        normalized_amount = details.get("normalized_amount")
+        normalized_unit = details.get("normalized_unit")
+        price = _clean_numeric(row.get("price"))
+
+        price_per_100 = None
+        unit_price_basis = None
+        price_per_unit = None
+
+        if normalized_amount is not None and price is not None:
+            if normalized_unit in {"g", "kg", "ml", "l"}:
+                price_per_100 = calculate_normalized_price(price, normalized_amount)
+                if normalized_unit in {"g", "kg"}:
+                    unit_price_basis = "per_100g"
+                elif normalized_unit in {"ml", "l"}:
+                    unit_price_basis = "per_100ml"
+            elif normalized_unit in {"piece", "pack"}:
+                price_per_unit = calculate_price_per_unit(
+                    price, normalized_amount, normalized_unit
+                )
+
+        df.at[index, "normalized_amount"] = normalized_amount
+        df.at[index, "normalized_unit"] = normalized_unit
+        df.at[index, "pack_parse_status"] = details.get("parse_status", "ambiguous")
+        df.at[index, "price_per_100"] = price_per_100
+        df.at[index, "price_per_unit"] = price_per_unit
+        df.at[index, "unit_price_basis"] = unit_price_basis
+
+    return df
 
 
 def _connect() -> Engine:
@@ -53,7 +109,13 @@ def init_db(conn: Connection | None = None) -> None:
             category_path TEXT,
             category_rank INTEGER,
             url TEXT,
-            scraped_at {timestamp_type} NOT NULL
+            scraped_at {timestamp_type} NOT NULL,
+            normalized_amount REAL,
+            normalized_unit TEXT,
+            pack_parse_status TEXT,
+            price_per_100 REAL,
+            price_per_unit REAL,
+            unit_price_basis TEXT
         )
     """))
     conn.execute(text("""
@@ -62,6 +124,43 @@ def init_db(conn: Connection | None = None) -> None:
             csv_path TEXT NOT NULL,
             rows INTEGER NOT NULL,
             ingested_at TEXT NOT NULL
+        )
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS collection_runs (
+            run_id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            status TEXT NOT NULL,
+            pages_attempted INTEGER,
+            pages_succeeded INTEGER,
+            rows_found INTEGER,
+            rows_valid INTEGER,
+            rows_ingested INTEGER,
+            rows_rejected INTEGER,
+            error_count INTEGER,
+            duration_seconds REAL
+        )
+    """))
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS source_health (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            run_id TEXT,
+            status TEXT NOT NULL,
+            expected_category_count INTEGER,
+            pages_requested INTEGER,
+            pages_returned INTEGER,
+            products_parsed INTEGER,
+            products_rejected INTEGER,
+            duplicate_count INTEGER,
+            http_failures INTEGER,
+            parser_failures INTEGER,
+            zero_row_result INTEGER NOT NULL DEFAULT 0,
+            anomaly_detected INTEGER NOT NULL DEFAULT 0,
+            notes TEXT
         )
     """))
     conn.execute(text(
@@ -83,6 +182,109 @@ def _file_run_id(csv_path: str) -> str:
     return digest.hexdigest()
 
 
+def record_collection_run(
+    source: str,
+    *,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+    status: str = "success",
+    pages_attempted: int | None = None,
+    pages_succeeded: int | None = None,
+    rows_found: int | None = None,
+    rows_valid: int | None = None,
+    rows_ingested: int | None = None,
+    rows_rejected: int | None = None,
+    error_count: int | None = None,
+    duration_seconds: float | None = None,
+) -> str:
+    """Persist a run-level collection record for observability and health checks."""
+    started = started_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    finished = finished_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    run_id = hashlib.sha256(f"{source}:{started}:{status}".encode("utf-8")).hexdigest()
+    engine = _connect()
+    try:
+        with engine.begin() as conn:
+            init_db(conn)
+            conn.execute(
+                text("""
+                    INSERT INTO collection_runs (
+                        run_id, source, started_at, finished_at, status,
+                        pages_attempted, pages_succeeded, rows_found, rows_valid,
+                        rows_ingested, rows_rejected, error_count, duration_seconds
+                    ) VALUES (
+                        :run_id, :source, :started_at, :finished_at, :status,
+                        :pages_attempted, :pages_succeeded, :rows_found, :rows_valid,
+                        :rows_ingested, :rows_rejected, :error_count, :duration_seconds
+                    )
+                    ON CONFLICT (run_id) DO UPDATE SET
+                        source = excluded.source,
+                        started_at = excluded.started_at,
+                        finished_at = excluded.finished_at,
+                        status = excluded.status,
+                        pages_attempted = excluded.pages_attempted,
+                        pages_succeeded = excluded.pages_succeeded,
+                        rows_found = excluded.rows_found,
+                        rows_valid = excluded.rows_valid,
+                        rows_ingested = excluded.rows_ingested,
+                        rows_rejected = excluded.rows_rejected,
+                        error_count = excluded.error_count,
+                        duration_seconds = excluded.duration_seconds
+                """),
+                {
+                    "run_id": run_id,
+                    "source": source,
+                    "started_at": started,
+                    "finished_at": finished,
+                    "status": status,
+                    "pages_attempted": pages_attempted,
+                    "pages_succeeded": pages_succeeded,
+                    "rows_found": rows_found,
+                    "rows_valid": rows_valid,
+                    "rows_ingested": rows_ingested,
+                    "rows_rejected": rows_rejected,
+                    "error_count": error_count,
+                    "duration_seconds": duration_seconds,
+                },
+            )
+            conn.execute(
+                text("""
+                    INSERT INTO source_health (
+                        source, observed_at, run_id, status,
+                        expected_category_count, pages_requested, pages_returned,
+                        products_parsed, products_rejected, duplicate_count,
+                        http_failures, parser_failures, zero_row_result,
+                        anomaly_detected, notes
+                    ) VALUES (
+                        :source, :observed_at, :run_id, :status,
+                        :expected_category_count, :pages_requested, :pages_returned,
+                        :products_parsed, :products_rejected, :duplicate_count,
+                        :http_failures, :parser_failures, :zero_row_result,
+                        :anomaly_detected, :notes
+                    )
+                """),
+                {
+                    "source": source,
+                    "observed_at": finished,
+                    "run_id": run_id,
+                    "status": status,
+                    "expected_category_count": None,
+                    "pages_requested": pages_attempted,
+                    "pages_returned": pages_succeeded,
+                    "products_parsed": rows_valid,
+                    "products_rejected": rows_rejected,
+                    "duplicate_count": None,
+                    "http_failures": error_count,
+                    "parser_failures": None,
+                    "zero_row_result": 1 if status in {"failed", "partial"} and (rows_found or 0) == 0 else 0,
+                    "anomaly_detected": 0,
+                    "notes": None,
+                },
+            )
+    finally:
+        engine.dispose()
+    return run_id
+
+
 def ingest_latest_csv(csv_path: str, force: bool = False) -> int:
     """Append a combined CSV once per unique file content and return its rows."""
     if not os.path.exists(csv_path):
@@ -100,6 +302,7 @@ def ingest_latest_csv(csv_path: str, force: bool = False) -> int:
     else:
         df["scraped_at"] = df["scraped_at"].fillna(fallback)
 
+    df = _prepare_pack_columns(df)
     run_id = _file_run_id(csv_path)
     engine = _connect()
     try:

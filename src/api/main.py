@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 import os
 import re
+from datetime import datetime, timezone
 from typing import Generator
 
 from fastapi import FastAPI, HTTPException, Query
@@ -126,6 +127,47 @@ def health() -> dict:
     with _connection() as conn:
         observations = _execute(conn, "SELECT COUNT(*) FROM snapshots").scalar_one()
         return {"status": "ok", "observations": observations}
+
+
+@app.get("/api/summary")
+def get_summary() -> dict:
+    with _connection() as conn:
+        latest = _execute(conn, "SELECT MAX(scraped_at) AS latest FROM snapshots").mappings().first()
+        current = _execute(
+            conn,
+            LATEST_PRODUCTS
+            + """
+            SELECT COUNT(*) AS products,
+                   SUM(CASE WHEN stock_flag = 'out_of_stock' THEN 1 ELSE 0 END) AS out_of_stock,
+                   SUM(CASE WHEN price IS NULL THEN 1 ELSE 0 END) AS unpriced,
+                   COUNT(DISTINCT source) AS retailers,
+                   MIN(scraped_at) AS oldest_observation,
+                   MAX(scraped_at) AS newest_observation
+            FROM ranked_products
+            WHERE product_rank = 1
+            """
+        ).mappings().first()
+        observations = _execute(conn, "SELECT COUNT(*) FROM snapshots").scalar_one()
+        sources = _all(
+            conn,
+            "SELECT source, COUNT(*) AS rows, MAX(scraped_at) AS latest_scrape FROM snapshots GROUP BY source ORDER BY source"
+        )
+        collection_runs = _all(
+            conn,
+            "SELECT source, status, started_at, finished_at, rows_ingested, rows_rejected, duration_seconds FROM collection_runs ORDER BY started_at DESC LIMIT 10"
+        )
+    return {
+        "products": current["products"] or 0,
+        "observations": observations,
+        "out_of_stock": current["out_of_stock"] or 0,
+        "unpriced": current["unpriced"] or 0,
+        "retailers": current["retailers"] or 0,
+        "latest_observation": latest["latest"],
+        "oldest_observation": current["oldest_observation"],
+        "newest_observation": current["newest_observation"],
+        "sources": sources,
+        "collection_runs": collection_runs,
+    }
 
 
 @app.get("/api/overview")
@@ -418,3 +460,232 @@ def get_shrinkflation_alerts() -> list[dict]:
         if {"normalized_amount", "normalized_unit"}.issubset(_columns(conn)):
             return _shrinkflation_from_features(conn)
         return _shrinkflation_from_titles(conn)
+
+
+@app.get("/api/prices/moves")
+def get_price_moves(
+    source: str | None = Query(default=None, max_length=80),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> list[dict]:
+    params: list[object] = []
+    source_clause = ""
+    if source:
+        source_clause = " AND source = ?"
+        params.append(source)
+    with _connection() as conn:
+        rows = _all(
+            conn,
+            """
+            WITH latest AS (
+                SELECT source, title, url, price, scraped_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY source, lower(title)
+                           ORDER BY scraped_at DESC, id DESC
+                       ) AS rn
+                FROM snapshots
+                WHERE 1 = 1
+            """
+            + source_clause
+            + """
+            )
+            SELECT source, title, url, price, scraped_at
+            FROM latest
+            WHERE rn = 1
+            ORDER BY price DESC NULLS LAST, source, lower(title)
+            LIMIT ?
+            """,
+            [*params, limit],
+        )
+    return rows
+
+
+@app.get("/api/promotions")
+def get_promotions(
+    source: str | None = Query(default=None, max_length=80),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> list[dict]:
+    params: list[object] = []
+    source_clause = ""
+    if source:
+        source_clause = " AND source = ?"
+        params.append(source)
+    with _connection() as conn:
+        rows = _all(
+            conn,
+            """
+            WITH ranked AS (
+                SELECT source, title, url, price, list_price, discount_percent, scraped_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY source, lower(title)
+                           ORDER BY scraped_at DESC, id DESC
+                       ) AS rn
+                FROM snapshots
+                WHERE discount_percent IS NOT NULL
+            """
+            + source_clause
+            + """
+            )
+            SELECT source, title, url, price, list_price, discount_percent, scraped_at
+            FROM ranked
+            WHERE rn = 1 AND discount_percent > 0
+            ORDER BY discount_percent DESC, scraped_at DESC
+            LIMIT ?
+            """,
+            [*params, limit],
+        )
+    return rows
+
+
+@app.get("/api/pack-size/changes")
+def get_pack_size_changes(
+    source: str | None = Query(default=None, max_length=80),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> list[dict]:
+    params: list[object] = []
+    source_clause = ""
+    if source:
+        source_clause = " AND source = ?"
+        params.append(source)
+    with _connection() as conn:
+        rows = _all(
+            conn,
+            """
+            WITH current AS (
+                SELECT source, title, url, normalized_amount, normalized_unit, scraped_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY source, lower(title)
+                           ORDER BY scraped_at DESC, id DESC
+                       ) AS rn
+                FROM snapshots
+                WHERE normalized_amount IS NOT NULL AND normalized_unit IS NOT NULL
+            """
+            + source_clause
+            + """
+            )
+            SELECT source, title, url, normalized_amount AS current_amount,
+                   normalized_unit AS current_unit, scraped_at AS current_scraped_at
+            FROM current
+            WHERE rn = 1
+            ORDER BY current_amount ASC, source, lower(title)
+            LIMIT ?
+            """,
+            [*params, limit],
+        )
+    return rows
+
+
+@app.get("/api/availability/events")
+def get_availability_events(
+    source: str | None = Query(default=None, max_length=80),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> list[dict]:
+    params: list[object] = []
+    source_clause = ""
+    if source:
+        source_clause = " AND source = ?"
+        params.append(source)
+    with _connection() as conn:
+        rows = _all(
+            conn,
+            """
+            WITH latest AS (
+                SELECT source, title, url, stock_flag, scraped_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY source, lower(title)
+                           ORDER BY scraped_at DESC, id DESC
+                       ) AS rn
+                FROM snapshots
+                WHERE stock_flag IN ('in_stock', 'out_of_stock', 'unknown')
+            """
+            + source_clause
+            + """
+            )
+            SELECT source, title, url, stock_flag, scraped_at
+            FROM latest
+            WHERE rn = 1
+            ORDER BY scraped_at DESC, source, lower(title)
+            LIMIT ?
+            """,
+            [*params, limit],
+        )
+    return rows
+
+
+@app.get("/api/data-quality")
+def get_data_quality() -> dict:
+    with _connection() as conn:
+        total_rows = _execute(conn, "SELECT COUNT(*) FROM snapshots").scalar_one()
+        rows_with_missing_price = _execute(conn, "SELECT COUNT(*) FROM snapshots WHERE price IS NULL").scalar_one()
+        rows_with_unknown_stock = _execute(conn, "SELECT COUNT(*) FROM snapshots WHERE stock_flag = 'unknown'").scalar_one()
+        rows_with_invalid_url = _execute(conn, "SELECT COUNT(*) FROM snapshots WHERE url IS NULL OR url = ''").scalar_one()
+        recent_runs = _all(
+            conn,
+            "SELECT source, status, started_at, finished_at, rows_ingested, rows_rejected, error_count FROM collection_runs ORDER BY started_at DESC LIMIT 10"
+        )
+        source_health = _all(
+            conn,
+            """
+            SELECT source, observed_at, status, pages_requested, pages_returned,
+                   products_parsed, products_rejected, zero_row_result, anomaly_detected,
+                   notes
+            FROM source_health
+            ORDER BY observed_at DESC, id DESC
+            LIMIT 20
+            """
+        )
+    return {
+        "total_rows": total_rows,
+        "rows_with_missing_price": rows_with_missing_price,
+        "rows_with_unknown_stock": rows_with_unknown_stock,
+        "rows_with_invalid_url": rows_with_invalid_url,
+        "collection_runs": recent_runs,
+        "source_health": source_health,
+    }
+
+
+@app.get("/api/collection-runs")
+def get_collection_runs(
+    source: str | None = Query(default=None, max_length=80),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> list[dict]:
+    params: list[object] = []
+    if source:
+        query = "SELECT * FROM collection_runs WHERE source = ? ORDER BY started_at DESC LIMIT ?"
+        params.extend((source, limit))
+    else:
+        query = "SELECT * FROM collection_runs ORDER BY started_at DESC LIMIT ?"
+        params.append(limit)
+    with _connection() as conn:
+        return _all(conn, query, params)
+
+
+@app.get("/api/source-health")
+def get_source_health(
+    source: str | None = Query(default=None, max_length=80),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> list[dict]:
+    params: list[object] = []
+    query = """
+        SELECT source, observed_at, run_id, status,
+               expected_category_count, pages_requested, pages_returned,
+               products_parsed, products_rejected, duplicate_count,
+               http_failures, parser_failures, zero_row_result, anomaly_detected,
+               notes
+        FROM source_health
+    """
+    if source:
+        query += " WHERE source = ?"
+        params.append(source)
+    query += " ORDER BY observed_at DESC, id DESC LIMIT ?"
+    params.append(limit)
+    with _connection() as conn:
+        return _all(conn, query, params)
+
+
+@app.get("/api/sources")
+def get_sources() -> list[dict]:
+    with _connection() as conn:
+        return _all(
+            conn,
+            "SELECT source, COUNT(*) AS rows, MAX(scraped_at) AS latest_scrape FROM snapshots GROUP BY source ORDER BY source"
+        )

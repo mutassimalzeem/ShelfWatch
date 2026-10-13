@@ -36,6 +36,14 @@ https://github.com/user-attachments/assets/9ee3f09c-4cbb-4e62-9cc6-95e5bdc132cf
 Production counts are a point-in-time snapshot and change after collection
 runs. Your local SQLite database may contain different data.
 
+## Demo
+
+Watch the [ShelfWatch demo video](demo.mp4).
+
+<video src="demo.mp4" controls width="100%">
+  Your browser does not support embedded video. [Watch the demo](demo.mp4).
+</video>
+
 ## Live dashboard
 
 Open [shelfwatch-weld.vercel.app](https://shelfwatch-weld.vercel.app) to browse

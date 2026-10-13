@@ -33,6 +33,25 @@ class TestShelfWatchAPI(unittest.TestCase):
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE collection_runs (
+                run_id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                status TEXT NOT NULL,
+                pages_attempted INTEGER,
+                pages_succeeded INTEGER,
+                rows_found INTEGER,
+                rows_valid INTEGER,
+                rows_ingested INTEGER,
+                rows_rejected INTEGER,
+                error_count INTEGER,
+                duration_seconds REAL
+            )
+            """
+        )
         conn.executemany(
             """
             INSERT INTO snapshots
